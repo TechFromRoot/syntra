@@ -12,16 +12,10 @@ export class User {
   userName: string;
 
   @Prop()
-  evmWalletAddress: string;
+  solWalletAddress: string;
 
   @Prop()
-  svmWalletAddress: string;
-
-  @Prop()
-  evmWalletDetails: string;
-
-  @Prop()
-  svmWalletDetails: string;
+  solWalletDetails: string;
 
   @Prop()
   linkCode: string;
@@ -31,25 +25,6 @@ export class User {
 
   @Prop({ default: 10 })
   sellSlippage: string;
-
-  @Prop({ default: 5 })
-  upperThreshold: number;
-
-  @Prop({ default: 5 })
-  lowerThreshold: number;
-
-  @Prop({
-    type: Map,
-    of: Number,
-    default: () => new Map<string, number>(),
-  })
-  targetAllocations: Map<string, number>; // {"MNT": 30, "USDC": 40, "MOE": 30}
-
-  @Prop({ default: false })
-  rebalanceEnabled: boolean;
-
-  @Prop({ default: true })
-  enableAgenticAutoSwap: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
