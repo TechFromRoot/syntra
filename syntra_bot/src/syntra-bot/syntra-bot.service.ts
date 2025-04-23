@@ -1,6 +1,12 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
-import TelegramBot from 'node-telegram-bot-api';
+import * as TelegramBot from 'node-telegram-bot-api';
+import { VybeIntegrationService } from 'src/vybe-integration/vybe-integration.service';
+import { welcomeMessageMarkup, tokenDisplayMarkup } from './markups';
+import { InjectModel } from '@nestjs/mongoose';
+import { User } from 'src/database/schemas/user.schema';
+import { Model } from 'mongoose';
+import { WalletService } from 'src/wallet/wallet.service';
 
 const token = process.env.TELEGRAM_TOKEN;
 @Injectable()
@@ -8,7 +14,12 @@ export class SyntraBotService {
   private readonly syntraBot: TelegramBot;
   private logger = new Logger(SyntraBotService.name);
 
-  constructor(private readonly httpService: HttpService) {
+  constructor(
+    private readonly httpService: HttpService,
+    private readonly walletService: WalletService,
+    private readonly vybeService: VybeIntegrationService,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+  ) {
     this.syntraBot = new TelegramBot(token, { polling: true });
     this.syntraBot.on('message', this.handleRecievedMessages);
   }
@@ -24,42 +35,42 @@ export class SyntraBotService {
       const command = msg.text.trim();
       const mintRegex = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/;
       const match = command.match(mintRegex);
-      const regexTrack = /^\/start ca-([a-zA-Z0-9]+)$/;
-      const matchTrack = msg.text.trim().match(regexTrack);
-      const deleteRegexTrack = /^\/start del-([a-zA-Z0-9]+)$/;
-      const matchDelete = msg.text.trim().match(deleteRegexTrack);
+      //   const regexTrack = /^\/start ca-([a-zA-Z0-9]+)$/;
+      //   const matchTrack = msg.text.trim().match(regexTrack);
+      //   const deleteRegexTrack = /^\/start del-([a-zA-Z0-9]+)$/;
+      //   const matchDelete = msg.text.trim().match(deleteRegexTrack);
       const regexX = /^\/start x-([1-9A-HJ-NP-Za-km-z]{32,44})$/;
       const matchX = msg.text.trim().match(regexX);
 
-      if (matchTrack) {
-        await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
-        const { tokenDetail } = await this.rugCheckService.getTokenDetails(
-          matchTrack[1],
-        );
-        console.log('contract address :', tokenDetail);
-        if (!tokenDetail) {
-          return;
-        }
-        const creator = await this.addOrUpdateCreator(
-          tokenDetail.mint,
-          tokenDetail.creator,
-          tokenDetail.tokenMeta.symbol,
-          msg.chat.id,
-        );
-        if (creator) {
-          const message = `
-      ✅ The creator wallet (<code>${creator.creatorAddress}</code>) for token ${creator.tokenSymbol} has been added to your tracking list.\n📩 You will be notified when the creator sells their tokens.
-    `;
-          return await this.syntraBot.sendMessage(msg.chat.id, message, {
-            parse_mode: 'HTML',
-          });
-        }
-        return;
-      }
-      if (matchDelete) {
-        await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
-        return await this.removeChatIdFromCreator(matchDelete[1], msg.chat.id);
-      }
+      //   if (matchTrack) {
+      //     await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+      //     const { tokenDetail } = await this.vybeService.getTokenDetails(
+      //       matchTrack[1],
+      //     );
+      //     console.log('contract address :', tokenDetail);
+      //     if (!tokenDetail) {
+      //       return;
+      //     }
+      //     const creator = await this.addOrUpdateCreator(
+      //       tokenDetail.mint,
+      //       tokenDetail.creator,
+      //       tokenDetail.tokenMeta.symbol,
+      //       msg.chat.id,
+      //     );
+      //     if (creator) {
+      //       const message = `
+      //   ✅ The creator wallet (<code>${creator.creatorAddress}</code>) for token ${creator.tokenSymbol} has been added to your tracking list.\n📩 You will be notified when the creator sells their tokens.
+      // `;
+      //       return await this.syntraBot.sendMessage(msg.chat.id, message, {
+      //         parse_mode: 'HTML',
+      //       });
+      //     }
+      //     return;
+      //   }
+      //   if (matchDelete) {
+      //     await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+      //     return await this.removeChatIdFromCreator(matchDelete[1], msg.chat.id);
+      //   }
       if (command === '/start') {
         const username = `${msg.from.username}`;
         const userExist = await this.userModel.findOne({ chatId: msg.chat.id });
@@ -101,24 +112,24 @@ export class SyntraBotService {
         }
         try {
           const token = match?.[0] || matchX?.[1];
-          const data = await this.rugCheckService.getTokenReport$Vote(token);
-          if (!data.tokenDetail || !data.tokenVotes) {
+          const data = await this.vybeService.getTokenReport(token);
+          if (!data.tokenDetail || !data.topHolders) {
             return;
           }
           const tokenDetail = await tokenDisplayMarkup(
             data.tokenDetail,
-            data.tokenVotes,
+            data.topHolders,
           );
 
-          const replyMarkup = { inline_keyboard: tokenDetail.keyboard };
+          //   const replyMarkup = { inline_keyboard: tokenDetail.keyboard };
 
           if (matchX) {
             return await this.syntraBot.sendMessage(
               msg.chat.id,
               tokenDetail.message,
               {
-                reply_markup: replyMarkup,
-                parse_mode: 'Markdown',
+                // reply_markup: replyMarkup,
+                parse_mode: 'HTML',
               },
             );
           }
@@ -126,8 +137,8 @@ export class SyntraBotService {
             msg.chat.id,
             tokenDetail.message,
             {
-              reply_markup: replyMarkup,
-              parse_mode: 'Markdown',
+              //   reply_markup: replyMarkup,
+              parse_mode: 'HTML',
               reply_to_message_id: msg.message_id,
             },
           );
@@ -136,29 +147,30 @@ export class SyntraBotService {
           this.logger.warn(error);
         }
       }
-      if (msg.text.trim() === '/creator_wallets') {
-        return await this.listTrackedCreators(msg.chat.id);
-      }
-      if (msg.text.trim() === '/key') {
-        const keyIndex = await this.callModel.findOne();
-
-        if (!keyIndex) {
-          await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
-          return await this.syntraBot.sendMessage(
-            msg.chat.id,
-            `There is no API Key`,
-          );
-        }
-        const currentKeyIndex = keyIndex.call;
-        // const currentApiKey = this.apiKeys[currentKeyIndex];
-
-        return await this.syntraBot.sendMessage(
-          msg.chat.id,
-          `Current Key index is ${currentKeyIndex}`,
-        );
-      }
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  saveUserToDB = async (chat_id: number, platform = 'telegram') => {
+    try {
+      const newSVMWallet = await this.walletService.createSVMWallet();
+      const [encryptedSVMWalletDetails] = await Promise.all([
+        this.walletService.encryptSVMWallet(
+          process.env.DEFAULT_WALLET_PIN!,
+          newSVMWallet.privateKey,
+        ),
+      ]);
+      const user = new this.userModel({
+        chatId: chat_id,
+        platform,
+        svmWalletAddress: newSVMWallet.address,
+        svmWalletDetails: encryptedSVMWalletDetails.json,
+      });
+
+      return await user.save();
+    } catch (error) {
+      console.log(error);
     }
   };
 }

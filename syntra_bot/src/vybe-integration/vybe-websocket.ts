@@ -17,7 +17,7 @@ export class VybeWebSocketService {
     @InjectModel(TrackedWallet.name)
     private readonly trackedWalletModel: Model<TrackedWallet>,
   ) {
-    this.connect();
+    // this.connect();
   }
 
   private getTimestamp(): number {

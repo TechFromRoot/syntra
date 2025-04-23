@@ -33,10 +33,9 @@ export class VybeIntegrationService {
 
     const holdersData =
       holdersResult.status === 'fulfilled' && !holdersResult.value.data.error
-        ? holdersResult.value.data.data.slice(0, 10) // Limit to top 10 holders
+        ? holdersResult.value.data.data.slice(0, 10)
         : null;
 
-    // Return data even if one API fails, as long as at least one succeeds
     if (!tokenData && !holdersData) {
       return undefined;
     }

@@ -28,6 +28,7 @@
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.0",
     "bcrypt": "^5.1.1",
+    "bs58": "^6.0.0",
     "dotenv": "^16.5.0",
     "mongoose": "^8.13.2",
     "node-telegram-bot-api": "^0.66.0",
