@@ -22,14 +22,13 @@ const formatPrice = (price: number): string => {
 export const tokenDisplayMarkup = async (
   token: TokenData,
   topHolders: HolderData[] | null,
+  // isprivate_chat?: boolean,
 ) => {
   const lines: string[] = [];
 
   // Title with symbol and mint address
   lines.push(`💜 <b>${token.name} (${token.symbol})</b>`);
-  lines.push(
-    `└ <code>${shortenAddress(token.mintAddress)}</code> (#SOL | 71d)`,
-  ); // Hardcoded chain and age as per image
+  lines.push(`└ <code>${token.mintAddress}</code>`); // Hardcoded chain and age as per image
 
   // Token Stats
   const statsFields: string[] = [];
@@ -84,92 +83,33 @@ export const tokenDisplayMarkup = async (
       ? fullMessage.substring(0, 4093) + '...'
       : fullMessage;
 
-  // Inline Keyboard Buttons
-  const keyboard = [
-    // Dropdown for Top 10 Holders
-    topHolders?.length
-      ? [
-          {
-            text: '👥 View Top 10 Holders',
-            callback_data: JSON.stringify({
-              c: `/top10holders|${token.mintAddress}`,
-            }),
-          },
-        ]
-      : [],
-    // Action Buttons
-    [
-      {
-        text: '📈 Track Token',
-        url: `${process.env.BOT_URL}?start=track-${token.mintAddress}`,
-      },
-      {
-        text: '🤖 Trade Token',
-        url: `https://t.me/fluxbeam_bot?start=ca-${token.mintAddress}`,
-      },
-    ],
-    [
-      {
-        text: '🗑️ Delete',
-        callback_data: JSON.stringify({
-          c: `/delete|${token.mintAddress}`,
-        }),
-      },
-      {
-        text: '🔄 Refresh',
-        callback_data: JSON.stringify({
-          c: `/refresh|${token.mintAddress}`,
-        }),
-      },
-    ],
-  ];
+  const keyboard = [];
+
+  keyboard.push([
+    {
+      text: '🤖 Trade Token',
+      url: `${process.env.BOT_URL}?start=ca-${token.mintAddress}`,
+    },
+  ]);
+
+  // Always add Delete and Refresh buttons
+  keyboard.push([
+    {
+      text: '🗑️ Delete',
+      callback_data: JSON.stringify({
+        c: `/delete|${token.mintAddress}`,
+      }),
+    },
+    {
+      text: '🔄 Refresh',
+      callback_data: JSON.stringify({
+        c: `/refresh|${token.mintAddress}`,
+      }),
+    },
+  ]);
 
   return {
     message,
-    parse_mode: 'HTML',
     keyboard,
-  };
-};
-
-// Function to handle the Top 10 Holders dropdown callback
-export const topHoldersMarkup = (
-  topHolders: HolderData[],
-  token: TokenData,
-) => {
-  const lines: string[] = [];
-
-  // Title
-  lines.push(`👥 <b>Top 10 Holders for ${token.name} (${token.symbol})</b>`);
-
-  // List Top 10 Holders
-  const holdersText = topHolders
-    .slice(0, 10)
-    .map((h, index) => {
-      const amount = formatNumber(parseFloat(h.balance) / 10 ** token.decimal);
-      const prefix = index === 9 ? '└' : '├'; // Last item uses └, others use ├
-      return `${prefix} 🥇 ${shortenAddress(h.ownerAddress)}: ${amount} (${h.percentageOfSupplyHeld.toFixed(2)}%)`;
-    })
-    .join('\n');
-  lines.push(holdersText);
-
-  const fullMessage = lines.join('\n');
-  const message =
-    fullMessage.length > 4096
-      ? fullMessage.substring(0, 4093) + '...'
-      : fullMessage;
-
-  return {
-    message,
-    parse_mode: 'HTML',
-    keyboard: [
-      [
-        {
-          text: '⬅️ Back to Token Details',
-          callback_data: JSON.stringify({
-            c: `/token|${token.mintAddress}`,
-          }),
-        },
-      ],
-    ],
   };
 };

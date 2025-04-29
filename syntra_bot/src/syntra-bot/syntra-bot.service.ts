@@ -110,7 +110,15 @@ export class SyntraBotService {
         if (matchX) {
           await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
         }
+        const loadingGif = await this.syntraBot.sendAnimation(
+          msg.chat.id,
+          'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2Q0aG52b3pmNm1iNWxyb254aHRnbWxvYzJjbDA4NzBwejBwdGZjZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xTk9ZvMnbIiIew7IpW/giphy.gif',
+          {
+            caption: 'Fetching data...',
+          },
+        );
         try {
+          await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
           const token = match?.[0] || matchX?.[1];
           const data = await this.vybeService.getTokenReport(token);
           if (!data.tokenDetail || !data.topHolders) {
@@ -121,29 +129,45 @@ export class SyntraBotService {
             data.topHolders,
           );
 
-          //   const replyMarkup = { inline_keyboard: tokenDetail.keyboard };
+          const replyMarkup = { inline_keyboard: tokenDetail.keyboard };
 
           if (matchX) {
+            await this.syntraBot.deleteMessage(
+              msg.chat.id,
+              loadingGif.message_id,
+            );
             return await this.syntraBot.sendMessage(
               msg.chat.id,
               tokenDetail.message,
               {
-                // reply_markup: replyMarkup,
+                reply_markup: replyMarkup,
                 parse_mode: 'HTML',
               },
             );
           }
+          await this.syntraBot.deleteMessage(
+            msg.chat.id,
+            loadingGif.message_id,
+          );
           return await this.syntraBot.sendMessage(
             msg.chat.id,
             tokenDetail.message,
             {
-              //   reply_markup: replyMarkup,
+              reply_markup: replyMarkup,
               parse_mode: 'HTML',
               reply_to_message_id: msg.message_id,
             },
           );
         } catch (error) {
+          // await this.syntraBot.deleteMessage(
+          //   msg.chat.id,
+          //   loadingGif.message_id,
+          // );
           console.error(error);
+          await this.syntraBot.sendMessage(
+            msg.chat.id,
+            'Sorry error processing your request',
+          );
           this.logger.warn(error);
         }
       }
