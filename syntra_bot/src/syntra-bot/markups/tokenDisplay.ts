@@ -1,4 +1,4 @@
-import { TokenData, HolderData } from 'src/vybe-integration/interfaceS';
+import { TokenData, HolderData } from 'src/vybe-integration/interfaces';
 console.log();
 
 const shortenAddress = (address: string): string => {

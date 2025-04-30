@@ -1,6 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable } from '@nestjs/common';
-import { TokenData, TokenReport, HolderData } from './interfaceS';
+import { TokenData, TokenReport, HolderData } from './interfaces';
 
 @Injectable()
 export class VybeIntegrationService {
