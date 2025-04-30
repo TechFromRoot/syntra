@@ -304,6 +304,32 @@ export class SyntraBotService {
           ' ✅All  active sessions closed successfully',
         );
       }
+      if (command === '/on' && msg.chat.type === 'private') {
+        const updatedUser = await this.userModel.findOneAndUpdate(
+          { chatId: msg.chat.id },
+          { tracking: true },
+          { new: true },
+        );
+        if (updatedUser) {
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            ' ✅Real time wallet tracking is now ON\n\n you can turn off tracking by using the command /off or by going to the settings menu',
+          );
+        }
+      }
+      if (command === '/off' && msg.chat.type === 'private') {
+        const updatedUser = await this.userModel.findOneAndUpdate(
+          { chatId: msg.chat.id },
+          { tracking: false },
+          { new: true },
+        );
+        if (updatedUser) {
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            ' ✅Real time wallet tracking is now OFF\n\n you can turn on tracking by using the command /on  or by going to the settings menu',
+          );
+        }
+      }
       if (
         (match || matchX) &&
         (msg.chat.type === 'private' ||
