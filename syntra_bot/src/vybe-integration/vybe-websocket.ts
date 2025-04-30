@@ -24,7 +24,7 @@ export class VybeWebSocketService {
     @Inject(forwardRef(() => SyntraBotService))
     private readonly syntraBotService: SyntraBotService,
   ) {
-    // this.connect();
+    this.connect();
   }
 
   private getTimestamp(): number {
