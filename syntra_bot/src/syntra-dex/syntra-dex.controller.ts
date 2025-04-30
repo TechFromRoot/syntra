@@ -1,9 +1,9 @@
-import { Body, Controller, Post } from '@nestjs/common';
-import { SyntraAgentService } from './syntra-dex.service';
+import { Controller, Post } from '@nestjs/common';
+import { SyntraDexService } from './syntra-dex.service';
 
 @Controller('syntra-agent')
-export class SyntraAgentController {
-  constructor(private readonly syntraService: SyntraAgentService) {}
+export class SyntraDexController {
+  constructor(private readonly syntraService: SyntraDexService) {}
 
   @Post()
   swapToken() {

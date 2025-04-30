@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { SyntraAgentService } from './syntra-dex.service';
-import { SyntraAgentController } from './syntra-agent.controller';
+import { SyntraDexService } from './syntra-dex.service';
+import { SyntraDexController } from './syntra-dex.controller';
 import { HttpModule } from '@nestjs/axios';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Transaction } from '@solana/web3.js';
@@ -15,7 +15,7 @@ import { WalletModule } from 'src/wallet/wallet.module';
     ]),
     WalletModule,
   ],
-  providers: [SyntraAgentService],
-  controllers: [SyntraAgentController],
+  providers: [SyntraDexService],
+  controllers: [SyntraDexController],
 })
-export class SyntraAgentModule {}
+export class SyntraDexModule {}
