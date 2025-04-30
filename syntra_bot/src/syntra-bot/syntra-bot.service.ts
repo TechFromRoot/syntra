@@ -563,7 +563,7 @@ export class SyntraBotService {
       if (regexAmount.test(msg.text.trim()) && session.sellAlertAmount) {
         const updatedUser = await this.userModel.findOneAndUpdate(
           { chatId: msg.chat.id },
-          { sellAlertAmount: msg.text.trim() },
+          { sellAlertAmount: msg.text.trim(), tracking: true },
           { new: true },
         );
         if (updatedUser) {
@@ -582,7 +582,7 @@ export class SyntraBotService {
           });
           return await this.syntraBot.sendMessage(
             msg.chat.id,
-            `✅  Wallet Tracking sell alert amount  to $${msg.text.trim()}`,
+            `✅  Wallet Tracking sell alert amount  to ${msg.text.trim()} units.. and tracking is now ON\n\n you can turn off tracking by going to the settings menu`,
           );
         }
         return;
@@ -590,7 +590,7 @@ export class SyntraBotService {
       if (regexAmount.test(msg.text.trim()) && session.buyAlertAmount) {
         const updatedUser = await this.userModel.findOneAndUpdate(
           { chatId: msg.chat.id },
-          { buyAlertAmount: msg.text.trim() },
+          { buyAlertAmount: msg.text.trim(), tracking: true },
           { new: true },
         );
         if (updatedUser) {
@@ -609,7 +609,7 @@ export class SyntraBotService {
           });
           return await this.syntraBot.sendMessage(
             msg.chat.id,
-            `✅ Wallet Tracking buy alert amount set to $${msg.text.trim()}`,
+            `✅ Wallet Tracking buy alert amount set to ${msg.text.trim()} units.. and tracking is now ON\n\n you can turn off tracking by going to the settings menu`,
           );
         }
         return;
