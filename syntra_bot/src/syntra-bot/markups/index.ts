@@ -1,3 +1,4 @@
+import { buyTokenMarkup } from './buyTokenDetails';
 import { displayPrivateKeyMarkup } from './displayPrivateKey';
 import { exportWalletWarningMarkup } from './exportWalletWarning';
 import { manageAssetMarkup } from './manageAsset';
@@ -6,6 +7,7 @@ import { resetWalletWarningMarkup } from './resetWalletWarning';
 import { sellTokenMarkup } from './sellTokenDetails';
 import { settingsMarkup } from './setting';
 import { tokenDisplayMarkup } from './tokenDisplay';
+import { transactionHistoryMarkup } from './transactionHistory';
 import { walletFeaturesMarkup } from './walletFeatures';
 import { welcomeMessageMarkup } from './welcome';
 
@@ -20,4 +22,6 @@ export {
   manageAssetMarkup,
   settingsMarkup,
   sellTokenMarkup,
+  buyTokenMarkup,
+  transactionHistoryMarkup,
 };

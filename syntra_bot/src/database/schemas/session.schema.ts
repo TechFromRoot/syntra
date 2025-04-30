@@ -24,9 +24,6 @@ export class Session {
   exportWallet: boolean;
 
   @Prop({ default: false })
-  createToken: boolean;
-
-  @Prop({ default: false })
   resetWallet: boolean;
 
   @Prop({ default: false })
@@ -52,6 +49,9 @@ export class Session {
 
   @Prop({ default: false })
   sellSlippage: boolean;
+
+  @Prop({ default: false })
+  trackWallet: boolean;
 
   @Prop()
   messageId: number;

@@ -250,7 +250,7 @@ export class WalletService {
           amount: tokenAmount.uiAmount,
         };
       })
-      .filter((token) => token.amount > 0); // Only keep tokens with balance > 0
+      .filter((token) => token.amount >= 0.01); // Only keep tokens with balance > 0.01 to  exclude dust,
 
     return tokenBalances;
   }

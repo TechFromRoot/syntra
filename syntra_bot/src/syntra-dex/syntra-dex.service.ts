@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable } from '@nestjs/common';
+import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Transaction } from 'src/database/schemas/transaction.schema';
@@ -14,12 +14,15 @@ import {
 } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
+import { SyntraBotService } from 'src/syntra-bot/syntra-bot.service';
 
 @Injectable()
 export class SyntraDexService {
   constructor(
     private readonly httpService: HttpService,
     private readonly walletService: WalletService,
+    @Inject(forwardRef(() => SyntraBotService))
+    private readonly syntraBotService: SyntraBotService,
     @InjectModel(Transaction.name)
     private readonly TransactionModel: Model<Transaction>,
   ) {}
@@ -30,7 +33,10 @@ export class SyntraDexService {
     amount: string,
     chatId: number,
   ) {
+    const loadingMessage =
+      await this.syntraBotService.sendTransactionLoading(chatId);
     try {
+      console.log('buy token', privateKey, tokenMint, amount);
       const inputMint = 'So11111111111111111111111111111111111111112';
       const outputMint = tokenMint;
       const inputTokenDetails = await this.getTokenDetails(inputMint);
@@ -44,7 +50,12 @@ export class SyntraDexService {
         process.env.SOLANA_RPC,
       );
 
-      if (balance < parseFloat(amount)) {
+      if (balance < parseFloat(amount) && balance - parseFloat(amount) < 0.01) {
+        // make sure the user has at least 0.01 SOL for transaction fees
+        await this.syntraBotService.deleteTransactionLoadingGif(
+          chatId,
+          loadingMessage,
+        );
         return 'Insufficient balance.';
       }
 
@@ -53,6 +64,7 @@ export class SyntraDexService {
         outputMint,
         Number(amount) * 10 ** inputTokenDetails.decimals,
       );
+      console.log('swapResponse', swapResponse);
 
       const connection = new Connection(process.env.SOLANA_RPC, {
         commitment: 'confirmed',
@@ -128,6 +140,10 @@ export class SyntraDexService {
       });
 
       if (confirmation.value.err) {
+        await this.syntraBotService.deleteTransactionLoadingGif(
+          chatId,
+          loadingMessage,
+        );
         throw new Error('Transaction failed');
       }
 
@@ -150,10 +166,31 @@ export class SyntraDexService {
       });
       await transactionDetails.save();
 
+      await this.syntraBotService.deleteTransactionLoadingGif(
+        chatId,
+        loadingMessage,
+      );
       return `https://explorer.solana.com/tx/${signature}?cluster=mainnet`;
     } catch (error: any) {
-      console.error('Error in swapToken:', error);
-      return `Error buying token: ${error.message}`;
+      await this.syntraBotService.deleteTransactionLoadingGif(
+        chatId,
+        loadingMessage,
+      );
+      const regex =
+        /TransactionExpiredBlockheightExceededError: Signature (\w+) has expired: block height exceeded/;
+      const match = error.message.match(regex);
+      if (match) {
+        const signature = match[1];
+        console.log('Extracted Signature:', signature);
+        return `https://explorer.solana.com/tx/${signature}?cluster=mainnet`;
+      } else {
+        await this.syntraBotService.deleteTransactionLoadingGif(
+          chatId,
+          loadingMessage,
+        );
+        console.error('Error in swapToken:', error);
+        return `Error buying token: ${error.message}`;
+      }
     }
   }
 
@@ -163,6 +200,8 @@ export class SyntraDexService {
     amountPercent: string,
     chatId: number,
   ) {
+    const loadingMessage =
+      await this.syntraBotService.sendTransactionLoading(chatId);
     try {
       const inputMint = tokenMint;
       const outputMint = 'So11111111111111111111111111111111111111112';
@@ -172,25 +211,32 @@ export class SyntraDexService {
       const userAccount = Keypair.fromSecretKey(bs58.decode(privateKey));
       const userAddress = userAccount.publicKey;
 
-      const { balance } = await this.walletService.getToken2022Balance(
+      console.log(amountPercent, privateKey);
+      const { balance } = await this.walletService.getSPLTokenBalance(
         String(userAddress),
         inputMint,
         process.env.SOLANA_RPC,
         Number(inputTokenDetails.decimals),
-        inputTokenDetails.programId,
       );
 
-      const amount = (balance * parseFloat(amountPercent)) / 100;
+      let amount = (balance * parseFloat(amountPercent)) / 100;
+      console.log('amount', amount);
+      amount = this.truncateTo9Decimals(amount);
 
       if (balance < amount) {
+        await this.syntraBotService.deleteTransactionLoadingGif(
+          chatId,
+          loadingMessage,
+        );
         return 'Insufficient balance.';
       }
 
       const swapResponse = await this.getSwapQuote(
         inputMint,
         outputMint,
-        Number(amount) * 10 ** inputTokenDetails.decimals,
+        +Number(amount) * 10 ** inputTokenDetails.decimals,
       );
+      console.log('swapResponse', swapResponse);
 
       const connection = new Connection(process.env.SOLANA_RPC, {
         commitment: 'confirmed',
@@ -259,6 +305,10 @@ export class SyntraDexService {
       });
 
       if (confirmation.value.err) {
+        await this.syntraBotService.deleteTransactionLoadingGif(
+          chatId,
+          loadingMessage,
+        );
         throw new Error('Transaction failed');
       }
 
@@ -281,10 +331,32 @@ export class SyntraDexService {
       });
       await transactionDetails.save();
 
+      await this.syntraBotService.deleteTransactionLoadingGif(
+        chatId,
+        loadingMessage,
+      );
+
       return `https://explorer.solana.com/tx/${signature}?cluster=mainnet`;
     } catch (error: any) {
-      console.error('Error in swapToken:', error);
-      return `Error selling token: ${error.message}`;
+      await this.syntraBotService.deleteTransactionLoadingGif(
+        chatId,
+        loadingMessage,
+      );
+      const regex =
+        /TransactionExpiredBlockheightExceededError: Signature (\w+) has expired: block height exceeded/;
+      const match = error.message.match(regex);
+      if (match) {
+        const signature = match[1];
+        console.log('Extracted Signature:', signature);
+        return `https://explorer.solana.com/tx/${signature}?cluster=mainnet`;
+      } else {
+        await this.syntraBotService.deleteTransactionLoadingGif(
+          chatId,
+          loadingMessage,
+        );
+        console.error('Error in swapToken:', error);
+        return `Error selling token: ${error.message}`;
+      }
     }
   }
 
@@ -335,4 +407,8 @@ export class SyntraDexService {
       console.error(error);
     }
   };
+
+  truncateTo9Decimals(num: number): number {
+    return Math.floor(num * 1e9) / 1e9;
+  }
 }

@@ -155,7 +155,7 @@ export class VybeWebSocketService {
     const trackedWallets = await this.trackedWalletModel.find({
       where: { walletAddress },
     });
-    const userIds = trackedWallets.map((tw) => tw.chatIds);
+    const userIds = trackedWallets.map((tw) => tw.chatId);
 
     // Placeholder for notification logic
     this.logger.log(`Notifying users ${userIds.join(', ')}: ${message}`);

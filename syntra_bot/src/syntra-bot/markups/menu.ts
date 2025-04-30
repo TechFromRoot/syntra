@@ -32,19 +32,12 @@ export const menuMarkup = async () => {
         {
           text: '👀 View Wallets You’re Tracking',
           callback_data: JSON.stringify({
-            command: '/trackWallet',
+            command: '/trackedWallets',
             language: 'english',
           }),
         },
       ],
       [
-        {
-          text: 'Analyse a token',
-          callback_data: JSON.stringify({
-            command: '/analyse',
-            language: 'english',
-          }),
-        },
         {
           text: 'Buy a token',
           callback_data: JSON.stringify({

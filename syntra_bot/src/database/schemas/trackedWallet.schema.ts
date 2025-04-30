@@ -9,7 +9,7 @@ export class TrackedWallet {
   walletAddress: string;
 
   @Prop()
-  chatIds: number[];
+  chatId: number[];
 }
 
 export const TrackedWalletSchema = SchemaFactory.createForClass(TrackedWallet);

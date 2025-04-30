@@ -1,5 +1,11 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import * as TelegramBot from 'node-telegram-bot-api';
 import { VybeIntegrationService } from 'src/vybe-integration/vybe-integration.service';
 import {
@@ -13,6 +19,8 @@ import {
   manageAssetMarkup,
   settingsMarkup,
   sellTokenMarkup,
+  buyTokenMarkup,
+  transactionHistoryMarkup,
 } from './markups';
 import { InjectModel } from '@nestjs/mongoose';
 import { User, UserDocument } from 'src/database/schemas/user.schema';
@@ -22,6 +30,11 @@ import { Session, SessionDocument } from 'src/database/schemas/session.schema';
 // import { TokenData } from 'src/vybe-integration/interfaces';
 import { Assets } from 'src/database/schemas/userAsset.schema';
 import { SyntraDexService } from 'src/syntra-dex/syntra-dex.service';
+import { Transaction } from 'src/database/schemas/transaction.schema';
+import {
+  TrackedWallet,
+  TrackedWalletDocument,
+} from 'src/database/schemas/trackedWallet.schema';
 
 interface Token {
   tokenMint: string;
@@ -38,10 +51,15 @@ export class SyntraBotService {
     private readonly httpService: HttpService,
     private readonly walletService: WalletService,
     private readonly vybeService: VybeIntegrationService,
+    @Inject(forwardRef(() => SyntraDexService))
     private readonly syntraDexService: SyntraDexService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     @InjectModel(Session.name) private readonly sessionModel: Model<Session>,
     @InjectModel(Assets.name) private readonly assetsModel: Model<Assets>,
+    @InjectModel(Transaction.name)
+    private readonly transactionModel: Model<Transaction>,
+    @InjectModel(TrackedWallet.name)
+    private readonly trackedWalletModel: Model<TrackedWallet>,
   ) {
     this.syntraBot = new TelegramBot(token, { polling: true });
     this.syntraBot.on('message', this.handleRecievedMessages);
@@ -69,11 +87,29 @@ export class SyntraBotService {
       const matchTrade = msg.text.trim().match(regexTrade);
       const regexPosition = /\/start\s+position_([a-zA-Z0-9]{43,})/;
       const matchPosition = msg.text.trim().match(regexPosition);
-      //   const deleteRegexTrack = /^\/start del-([a-zA-Z0-9]+)$/;
-      //   const matchDelete = msg.text.trim().match(deleteRegexTrack);
+      const deleteRegexTrack = /^\/start del-([a-zA-Z0-9]+)$/;
+      const matchDelete = msg.text.trim().match(deleteRegexTrack);
       const regexX = /^\/start x-([1-9A-HJ-NP-Za-km-z]{32,44})$/;
       const matchX = msg.text.trim().match(regexX);
+      const matchTrack = msg.text.trim().match(/\/track\s+(\w{32,44})/);
 
+      if (matchTrack) {
+        await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+        const wallet = await this.addOrUpdateTrackedWallets(
+          matchTrack[1],
+          msg.chat.id,
+        );
+        if (wallet) {
+          await this.sessionModel.deleteMany({ chatId: msg.chat.id });
+          const message = `
+      ✅  <code>${wallet.walletAddress}</code>  has been added to your tracking list.\n📩 You will be notified when they make transactions.
+    `;
+          return await this.syntraBot.sendMessage(msg.chat.id, message, {
+            parse_mode: 'HTML',
+          });
+        }
+        return;
+      }
       if (matchPosition) {
         let loadingGif;
         try {
@@ -144,10 +180,67 @@ export class SyntraBotService {
         }
       }
       if (matchTrade) {
-        await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+        let loadingGif;
+        try {
+          await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+          const supportedTokens =
+            await this.syntraDexService.fetchSupportedTokenPrice(matchTrade[1]);
 
-        console.log(matchTrade[1]);
-        return;
+          loadingGif = await this.syntraBot.sendAnimation(
+            msg.chat.id,
+            'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2Q0aG52b3pmNm1iNWxyb254aHRnbWxvYzJjbDA4NzBwejBwdGZjZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xTk9ZvMnbIiIew7IpW/giphy.gif',
+            {
+              caption: 'loading token data...',
+            },
+          );
+          const tokenData = await this.vybeService.getTokenDetails(
+            matchTrade[1],
+          );
+          console.log('supportedTokens:', supportedTokens);
+          if (supportedTokens && tokenData) {
+            const { balance: solBalance } =
+              await this.walletService.getSolBalance(
+                user.solWalletAddress,
+                process.env.SOLANA_RPC,
+              );
+
+            const buyToken = await buyTokenMarkup(tokenData, solBalance);
+            const replyMarkup = { inline_keyboard: buyToken.keyboard };
+            await this.syntraBot.sendMessage(msg.chat.id, buyToken.message, {
+              reply_markup: replyMarkup,
+              parse_mode: 'HTML',
+            });
+            await this.syntraBot.deleteMessage(
+              msg.chat.id,
+              loadingGif.message_id,
+            );
+            return;
+          }
+          console.log('contract address :', matchTrade[1]);
+          await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
+          await this.syntraBot.sendMessage(
+            msg.chat.id,
+            'Token not found/ supported',
+          );
+          await this.syntraBot.deleteMessage(
+            msg.chat.id,
+            loadingGif.message_id,
+          );
+          return;
+        } catch (error) {
+          console.error(error);
+          await this.syntraBot.deleteMessage(
+            msg.chat.id,
+            loadingGif.message_id,
+          );
+        }
+      }
+      if (matchDelete) {
+        await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+        return await this.removeChatIdFromTrackedWallet(
+          matchDelete[1],
+          msg.chat.id,
+        );
       }
       if (command === '/start') {
         const username = `${msg.from.username}`;
@@ -182,6 +275,29 @@ export class SyntraBotService {
           );
         }
       }
+      if (command === '/menu') {
+        await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
+        const allFeatures = await menuMarkup();
+        if (allFeatures) {
+          const replyMarkup = { inline_keyboard: allFeatures.keyboard };
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            allFeatures.message,
+            {
+              parse_mode: 'HTML',
+              reply_markup: replyMarkup,
+            },
+          );
+        }
+        return;
+      }
+      if (command === '/cancel') {
+        await this.sessionModel.deleteMany({ chatId: msg.chat.id });
+        return await this.syntraBot.sendMessage(
+          msg.chat.id,
+          ' ✅All  active sessions closed successfully',
+        );
+      }
       if (
         (match || matchX) &&
         (msg.chat.type === 'private' ||
@@ -190,6 +306,33 @@ export class SyntraBotService {
       ) {
         if (matchX) {
           await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+        }
+        if (session.trackWallet) {
+          console.log('session:', session);
+          const trackedWallet = await this.addOrUpdateTrackedWallets(
+            match?.[0],
+            msg.chat.id,
+          );
+          if (trackedWallet) {
+            return await this.syntraBot.sendMessage(
+              msg.chat.id,
+              'This wallet is already being tracked\n click /cancel to cancel current session',
+            );
+          }
+          const newTrackedWallet = await this.addOrUpdateTrackedWallets(
+            match?.[0],
+            msg.chat.id,
+          );
+          if (newTrackedWallet) {
+            await this.sessionModel.deleteMany({ chatId: msg.chat.id });
+            return await this.syntraBot.sendMessage(
+              msg.chat.id,
+              `✅  <code>${token}</code>  has been added to your tracking list.\n📩 You will be notified when they make transactions.`,
+              {
+                parse_mode: 'HTML',
+              },
+            );
+          }
         }
         const loadingGif = await this.syntraBot.sendAnimation(
           msg.chat.id,
@@ -226,6 +369,7 @@ export class SyntraBotService {
               },
             );
           }
+
           await this.syntraBot.deleteMessage(
             msg.chat.id,
             loadingGif.message_id,
@@ -259,6 +403,17 @@ export class SyntraBotService {
       if (regexAmount.test(msg.text.trim()) && session.sellSlippage) {
         // Handle text inputs if not a command
         return this.handleUserTextInputs(msg, session!);
+      }
+      if (regexAmount.test(msg.text.trim()) && session.tokenAmount) {
+        // Handle text inputs if not a command
+        return this.handleUserTextInputs(msg, session!);
+      }
+      if (regexAmount.test(msg.text.trim()) && session.sellAmount) {
+        // Handle text inputs if not a command
+        return this.handleUserTextInputs(msg, session!);
+      }
+      if (msg.text.trim() === '/trackedWallets') {
+        return await this.listTrackedWallets(msg.chat.id);
       }
     } catch (error) {
       console.error(error);
@@ -324,6 +479,56 @@ export class SyntraBotService {
         }
         return;
       }
+      if (regexAmount.test(msg.text.trim()) && session.sellAmount) {
+        //TODO: CALL sell SWAP FUNCTION HERE
+        const user = await this.userModel.findOne({
+          chatId: msg.chat.id,
+        });
+        const encryptedSVMWallet = await this.walletService.decryptSVMWallet(
+          `${process.env.DEFAULT_WALLET_PIN}`,
+          user.solWalletDetails,
+        );
+        if (encryptedSVMWallet.privateKey) {
+          const swapHash = await this.syntraDexService.botSellToken(
+            encryptedSVMWallet.privateKey,
+            session.sellTokenAmountAddress,
+            msg.text.trim(),
+            msg.chat.id,
+          );
+          if (swapHash) {
+            return await this.syntraBot.sendMessage(msg.chat.id, swapHash);
+          }
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            'Transaction error, please Try again',
+          );
+        }
+      }
+      if (regexAmount.test(msg.text.trim()) && session.tokenAmount) {
+        //TODO: CALL SWAP FUNCTION HERE
+        const user = await this.userModel.findOne({
+          chatId: msg.chat.id,
+        });
+        const encryptedSVMWallet = await this.walletService.decryptSVMWallet(
+          `${process.env.DEFAULT_WALLET_PIN}`,
+          user.solWalletDetails,
+        );
+        if (encryptedSVMWallet.privateKey) {
+          const swapHash = await this.syntraDexService.botBuyToken(
+            encryptedSVMWallet.privateKey,
+            session.tokenAmountAddress,
+            msg.text.trim(),
+            msg.chat.id,
+          );
+          if (swapHash) {
+            return await this.syntraBot.sendMessage(msg.chat.id, swapHash);
+          }
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            'Transaction error, please Try again',
+          );
+        }
+      }
 
       if (session) {
         // update users answerId
@@ -344,6 +549,9 @@ export class SyntraBotService {
     let command: string;
     let tokenAddress: string;
     let buy_addressCommand: string;
+    let sell_addressCommand: string;
+    let sell_amountPerc: number;
+    let buy_amount: number;
     const currentText = query.message!.text || '';
     let parsedData;
     // console.log(currentText);
@@ -362,7 +570,12 @@ export class SyntraBotService {
       parsedData = JSON.parse(query.data);
       if (parsedData.c) {
         buy_addressCommand = parsedData.c;
+        buy_amount = parsedData.a;
         [command, tokenAddress] = buy_addressCommand.split('|');
+      } else if (parsedData.s) {
+        sell_addressCommand = parsedData.s;
+        sell_amountPerc = parsedData.a;
+        [command, tokenAddress] = sell_addressCommand.split('|');
       } else if (parsedData.command) {
         command = parsedData.command;
       }
@@ -693,6 +906,27 @@ export class SyntraBotService {
             { reply_markup: replyMarkup, parse_mode: 'HTML' },
           );
 
+        case '/buyToken':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          await this.promptBuyToken(chatId);
+          return;
+
+        case '/trackWallet':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            trackWallet: true,
+            messageId: messageId,
+          });
+          if (session) {
+            await this.promptTrackWallet(chatId);
+            return;
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
         case '/buySlippage':
           await this.sessionModel.deleteMany({ chatId: chatId });
           session = await this.sessionModel.create({
@@ -724,6 +958,119 @@ export class SyntraBotService {
             query.message.chat.id,
             `Processing command failed, please try again`,
           );
+
+        case '/B':
+          await this.syntraBot.sendChatAction(chatId, 'typing');
+          const { balance } = await this.walletService.getSolBalance(
+            user.solWalletAddress,
+            process.env.SOLANA_RPC,
+          );
+          if (buy_amount == 0) {
+            return await this.promptBuyAmount(
+              query.message.chat.id,
+              balance,
+              tokenAddress,
+            );
+          } else {
+            await this.sessionModel.deleteMany({
+              chatId: query.message.chat.id,
+            });
+            //TODO: call swap function here
+            const encryptedSVMWallet =
+              await this.walletService.decryptSVMWallet(
+                `${process.env.DEFAULT_WALLET_PIN}`,
+                user.solWalletDetails,
+              );
+
+            if (encryptedSVMWallet.privateKey) {
+              const swapHash = await this.syntraDexService.botBuyToken(
+                encryptedSVMWallet.privateKey,
+                tokenAddress,
+                `${buy_amount}`,
+                query.message.chat.id,
+              );
+              if (swapHash) {
+                return await this.syntraBot.sendMessage(
+                  query.message.chat.id,
+                  swapHash,
+                );
+              }
+              return await this.syntraBot.sendMessage(
+                query.message.chat.id,
+                'Transaction error, please Try again',
+              );
+            }
+            return;
+          }
+
+        case '/S':
+          await this.syntraBot.sendChatAction(chatId, 'typing');
+          if (sell_amountPerc == 0) {
+            return await this.promptSellPercentageAmount(
+              query.message.chat.id,
+              tokenAddress,
+            );
+          } else {
+            await this.sessionModel.deleteMany({
+              chatId: query.message.chat.id,
+            });
+
+            const encryptedSVMWallet =
+              await this.walletService.decryptSVMWallet(
+                `${process.env.DEFAULT_WALLET_PIN}`,
+                user.solWalletDetails,
+              );
+            //TODO: call SELL swap function here
+            if (encryptedSVMWallet.privateKey) {
+              const swapHash = await this.syntraDexService.botSellToken(
+                encryptedSVMWallet.privateKey,
+                tokenAddress,
+                `${sell_amountPerc}`,
+                query.message.chat.id,
+              );
+              if (swapHash) {
+                return await this.syntraBot.sendMessage(
+                  query.message.chat.id,
+                  swapHash,
+                );
+              }
+              return await this.syntraBot.sendMessage(
+                query.message.chat.id,
+                'Transaction error, please Try again',
+              );
+            }
+            return;
+          }
+
+        case '/transactionHistory':
+          const userTransactions = await this.transactionModel.find({
+            chatId: user.chatId,
+          });
+
+          if (userTransactions.length > 0) {
+            const transactionHistory =
+              await transactionHistoryMarkup(userTransactions);
+
+            const replyMarkup = {
+              inline_keyboard: transactionHistory.keyboard,
+            };
+
+            return await this.syntraBot.sendMessage(
+              query.message.chat.id,
+              transactionHistory.message,
+              {
+                reply_markup: replyMarkup,
+                parse_mode: 'HTML',
+              },
+            );
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Your have not performed any transaction..`,
+          );
+
+        case '/trackedWallets':
+          return await this.listTrackedWallets(query.message.chat.id);
 
         case '/close':
           await this.syntraBot.sendChatAction(query.message.chat.id, 'typing');
@@ -905,6 +1252,7 @@ export class SyntraBotService {
         chatId: chatId,
       });
       if (!userAssets || !userAssets.assets.length) {
+        await this.syntraBot.deleteMessage(chatId, loadingGif.message_id);
         return await this.syntraBot.sendMessage(chatId, 'No assets found.');
       }
       const allAssets = userAssets.assets;
@@ -967,6 +1315,22 @@ export class SyntraBotService {
     }
   };
 
+  promptBuyToken = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendMessage(
+        chatId,
+        `paste the token address you wish to buy`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   promptBuySlippage = async (chatId: TelegramBot.ChatId) => {
     try {
       await this.syntraBot.sendMessage(
@@ -998,6 +1362,203 @@ export class SyntraBotService {
       console.log(error);
     }
   };
+
+  promptSellPercentageAmount = async (
+    chatId: TelegramBot.ChatId,
+    tokenAddress: string,
+  ) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      await this.sessionModel.deleteMany({ chatId: chatId });
+
+      await this.sessionModel.create({
+        chatId: chatId,
+        sellAmount: true,
+        sellTokenAmountAddress: tokenAddress,
+      });
+      await this.syntraBot.sendMessage(
+        chatId,
+        `Reply with the percentage amount you wish to sell (0 - 100 %)\nAfter submission, it will be sold immediately`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  promptBuyAmount = async (
+    chatId: TelegramBot.ChatId,
+    balance: any,
+    tokenAddress: string,
+  ) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      await this.sessionModel.deleteMany({ chatId: chatId });
+
+      await this.sessionModel.create({
+        chatId: chatId,
+        tokenAmount: true,
+        tokenAmountAddress: tokenAddress,
+      });
+      await this.syntraBot.sendMessage(
+        chatId,
+        `Reply with the amount of SOL you wish to buy(0 - ${balance}, E.g: 0.1)\nAfter submission, it will be bought immediately`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  promptTrackWallet = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+
+      await this.syntraBot.sendMessage(
+        chatId,
+        `paste the wallet address you wish to track`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  sendTransactionLoading = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      const loadingGif = await this.syntraBot.sendAnimation(
+        chatId,
+        'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2Q0aG52b3pmNm1iNWxyb254aHRnbWxvYzJjbDA4NzBwejBwdGZjZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xTk9ZvMnbIiIew7IpW/giphy.gif',
+        {
+          caption: 'Processing transaction...',
+        },
+      );
+
+      return loadingGif.message_id;
+    } catch (error) {
+      console.error('Error sending message:', error);
+      return;
+    }
+  };
+
+  deleteTransactionLoadingGif = async (
+    chatId: TelegramBot.ChatId,
+    messageId: number,
+  ) => {
+    try {
+      await this.syntraBot.deleteMessage(chatId, messageId);
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      return;
+    }
+  };
+
+  async addOrUpdateTrackedWallets(
+    walletAddress: string,
+    chatId: number,
+  ): Promise<TrackedWalletDocument> {
+    const updatedWallets = await this.trackedWalletModel.findOneAndUpdate(
+      { walletAddress },
+      {
+        $addToSet: { chatId },
+      },
+      {
+        new: true,
+        upsert: true,
+      },
+    );
+
+    return updatedWallets;
+  }
+
+  async findTrackedWalletsByChatId(
+    chatId: number,
+  ): Promise<TrackedWalletDocument[]> {
+    return this.trackedWalletModel.find({ chatId: chatId }).exec();
+  }
+
+  async listTrackedWallets(chatId: number): Promise<void> {
+    const wallets = await this.findTrackedWalletsByChatId(chatId);
+
+    let message: string;
+
+    if (!wallets || wallets.length === 0) {
+      message = 'You are not tracking any Wallet.';
+    } else {
+      message = '📋 <b>Your tracked Wallets:</b>\n\n';
+      wallets.forEach((wallet, index) => {
+        message += `${index + 1}. <code>${wallet.walletAddress}</code>\n(<a href="${process.env.BOT_URL}?start=del-${wallet.walletAddress}"> Delete 🚮</a>)\n`;
+      });
+    }
+
+    try {
+      await this.syntraBot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+      });
+    } catch (error) {
+      console.error(`Failed to send message to chatId ${chatId}:`, error);
+      throw new Error('Failed to send message');
+    }
+  }
+
+  async removeChatIdFromTrackedWallet(
+    walletAddress: string,
+    chatId: number,
+  ): Promise<{ message: string }> {
+    const result = await this.trackedWalletModel
+      .findOneAndUpdate(
+        { walletAddress, chatId },
+        [
+          {
+            $set: {
+              chatId: {
+                $cond: {
+                  if: { $eq: [{ $size: '$chatId' }, 1] },
+                  then: [],
+                  else: { $setDifference: ['$chatId', [chatId]] },
+                },
+              },
+            },
+          },
+        ],
+        { new: true },
+      )
+      .exec();
+
+    if (!result) {
+      throw new NotFoundException(
+        ` ${walletAddress} or chatId ${chatId} not found`,
+      );
+    }
+
+    // If chatId array is empty, delete the document
+    if (result.chatId.length === 0) {
+      await this.trackedWalletModel.deleteOne({ walletAddress }).exec();
+      await this.syntraBot.sendMessage(
+        chatId,
+        ` ${result.walletAddress} has been removed from your tracking list `,
+      );
+      return;
+    }
+    await this.syntraBot.sendMessage(
+      chatId,
+      ` ${result.walletAddress} has been removed from your tracking list `,
+    );
+    return;
+  }
 
   private normalizeHtml(input: string): string {
     return (

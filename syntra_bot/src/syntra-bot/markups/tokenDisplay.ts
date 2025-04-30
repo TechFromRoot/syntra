@@ -43,16 +43,7 @@ export const tokenDisplayMarkup = async (
       `📈 <b>Vol:</b> $${formatNumber(token.usdValueVolume24h)}`,
     );
   }
-  if (token.currentSupply !== undefined) {
-    const lp = (token.currentSupply / 10 ** token.decimal) * token.price; // Estimating LP
-    statsFields.push(`🏊 <b>LP:</b> $${formatNumber(lp)} 🟡`); // Warning emoji as per image
-  }
-  statsFields.push(`🕒 <b>1H:</b> 0% 🅱 0 🆂 0`); // Static as per image
-  if (token.currentSupply !== undefined) {
-    statsFields.push(
-      `🪙 <b>ATH:</b> $${formatNumber(token.currentSupply * token.price)} (-100% / 71d)`,
-    ); // Estimating ATH
-  }
+
   if (statsFields.length > 0) {
     lines.push(`\n📊 <b>Token Stats</b>`);
     statsFields.forEach((field, index) => {
