@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { SyntraAgentService } from './syntra-agent.service';
+import { SyntraAgentService } from './syntra-dex.service';
 import { SyntraAgentController } from './syntra-agent.controller';
 import { HttpModule } from '@nestjs/axios';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -13,9 +13,9 @@ import { WalletModule } from 'src/wallet/wallet.module';
     MongooseModule.forFeature([
       { name: Transaction.name, schema: TransactionSchema },
     ]),
-    WalletModule
+    WalletModule,
   ],
   providers: [SyntraAgentService],
-  controllers: [SyntraAgentController]
+  controllers: [SyntraAgentController],
 })
-export class SyntraAgentModule { }
+export class SyntraAgentModule {}

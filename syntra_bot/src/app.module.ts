@@ -6,10 +6,17 @@ import { DexModule } from './dex/dex.module';
 import { VybeIntegrationModule } from './vybe-integration/vybe-integration.module';
 import { DatabaseModule } from './database/database.module';
 import { WalletModule } from './wallet/wallet.module';
-import { SyntraAgentModule } from './syntra-agent/syntra-agent.module';
+import { SyntraAgentModule } from './syntra-dex/syntra-agent.module';
 
 @Module({
-  imports: [SyntraBotModule, DexModule, VybeIntegrationModule, DatabaseModule, WalletModule, SyntraAgentModule],
+  imports: [
+    SyntraBotModule,
+    DexModule,
+    VybeIntegrationModule,
+    DatabaseModule,
+    WalletModule,
+    SyntraAgentModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

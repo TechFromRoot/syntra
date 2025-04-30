@@ -97,7 +97,7 @@ export const tokenDisplayMarkup = async (
     {
       text: '🗑️ Delete',
       callback_data: JSON.stringify({
-        c: `/delete|${token.mintAddress}`,
+        c: `/close`,
       }),
     },
     {

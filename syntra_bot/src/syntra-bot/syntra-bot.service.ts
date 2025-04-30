@@ -22,6 +22,7 @@ export class SyntraBotService {
   ) {
     this.syntraBot = new TelegramBot(token, { polling: true });
     this.syntraBot.on('message', this.handleRecievedMessages);
+    this.syntraBot.on('callback_query', this.handleButtonCommands);
   }
 
   handleRecievedMessages = async (msg: any) => {
@@ -35,42 +36,19 @@ export class SyntraBotService {
       const command = msg.text.trim();
       const mintRegex = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/;
       const match = command.match(mintRegex);
-      //   const regexTrack = /^\/start ca-([a-zA-Z0-9]+)$/;
-      //   const matchTrack = msg.text.trim().match(regexTrack);
+      const regexTrade = /^\/start ca-([a-zA-Z0-9]+)$/;
+      const matchTrade = msg.text.trim().match(regexTrade);
       //   const deleteRegexTrack = /^\/start del-([a-zA-Z0-9]+)$/;
       //   const matchDelete = msg.text.trim().match(deleteRegexTrack);
       const regexX = /^\/start x-([1-9A-HJ-NP-Za-km-z]{32,44})$/;
       const matchX = msg.text.trim().match(regexX);
 
-      //   if (matchTrack) {
-      //     await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
-      //     const { tokenDetail } = await this.vybeService.getTokenDetails(
-      //       matchTrack[1],
-      //     );
-      //     console.log('contract address :', tokenDetail);
-      //     if (!tokenDetail) {
-      //       return;
-      //     }
-      //     const creator = await this.addOrUpdateCreator(
-      //       tokenDetail.mint,
-      //       tokenDetail.creator,
-      //       tokenDetail.tokenMeta.symbol,
-      //       msg.chat.id,
-      //     );
-      //     if (creator) {
-      //       const message = `
-      //   ✅ The creator wallet (<code>${creator.creatorAddress}</code>) for token ${creator.tokenSymbol} has been added to your tracking list.\n📩 You will be notified when the creator sells their tokens.
-      // `;
-      //       return await this.syntraBot.sendMessage(msg.chat.id, message, {
-      //         parse_mode: 'HTML',
-      //       });
-      //     }
-      //     return;
-      //   }
-      //   if (matchDelete) {
-      //     await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
-      //     return await this.removeChatIdFromCreator(matchDelete[1], msg.chat.id);
-      //   }
+      if (matchTrade) {
+        await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+
+        console.log(matchTrade[1]);
+        return;
+      }
       if (command === '/start') {
         const username = `${msg.from.username}`;
         const userExist = await this.userModel.findOne({ chatId: msg.chat.id });
@@ -176,6 +154,111 @@ export class SyntraBotService {
     }
   };
 
+  handleButtonCommands = async (query: any) => {
+    this.logger.debug(query);
+    let command: string;
+    let tokenAddress: string;
+    let buy_addressCommand: string;
+    const currentText = query.message!.text || '';
+    console.log(currentText);
+
+    function isJSON(str) {
+      try {
+        JSON.parse(str);
+        return true;
+      } catch (e) {
+        console.log(e);
+        return false;
+      }
+    }
+
+    if (isJSON(query.data)) {
+      const parsedData = JSON.parse(query.data);
+      if (parsedData.c) {
+        buy_addressCommand = parsedData.c;
+        [command, tokenAddress] = buy_addressCommand.split('|');
+      }
+    } else {
+      command = query.data;
+    }
+
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+
+    try {
+      switch (command) {
+        case '/refresh':
+          await this.syntraBot.sendChatAction(chatId, 'typing');
+          const loadingGif = await this.syntraBot.sendAnimation(
+            chatId,
+            'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2Q0aG52b3pmNm1iNWxyb254aHRnbWxvYzJjbDA4NzBwejBwdGZjZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xTk9ZvMnbIiIew7IpW/giphy.gif',
+            {
+              caption: 'refreshing data...',
+              reply_to_message_id: messageId,
+            },
+          );
+          try {
+            const data = await this.vybeService.getTokenReport(tokenAddress);
+            if (!data.tokenDetail || !data.topHolders) {
+              return;
+            }
+            const updatedMarkup = await tokenDisplayMarkup(
+              data.tokenDetail,
+              data.topHolders,
+            );
+            const strippedBlockquote = this.normalizeHtml(
+              updatedMarkup.message,
+            );
+            console.log(strippedBlockquote);
+
+            // Compare new message and keyboard with current
+            const isMessageSame = strippedBlockquote === currentText;
+            console.log(isMessageSame);
+            if (isMessageSame) {
+              await this.syntraBot.deleteMessage(chatId, loadingGif.message_id);
+              return;
+            }
+
+            const replyMarkup = { inline_keyboard: updatedMarkup.keyboard };
+
+            await this.syntraBot.editMessageText(updatedMarkup.message, {
+              chat_id: chatId,
+              message_id: messageId,
+              parse_mode: 'HTML',
+              reply_markup: replyMarkup,
+            });
+            await this.syntraBot.deleteMessage(chatId, loadingGif.message_id);
+          } catch (error) {
+            await this.syntraBot.deleteMessage(chatId, loadingGif.message_id);
+            console.error('Refresh error:', error);
+            await this.syntraBot.sendMessage(
+              chatId,
+              'Failed to refresh token data.',
+              {
+                reply_to_message_id: messageId,
+              },
+            );
+          }
+          break;
+
+        case '/close':
+          await this.syntraBot.sendChatAction(query.message.chat.id, 'typing');
+          return await this.syntraBot.deleteMessage(
+            query.message.chat.id,
+            query.message.message_id,
+          );
+
+        default:
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   saveUserToDB = async (chat_id: number, platform = 'telegram') => {
     try {
       const newSVMWallet = await this.walletService.createSVMWallet();
@@ -197,4 +280,16 @@ export class SyntraBotService {
       console.log(error);
     }
   };
+
+  normalizeHtml(input: string): string {
+    return (
+      input
+        // Remove all HTML tags
+        .replace(/<[^>]+>/g, '')
+        // Decode HTML entities
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+    );
+  }
 }
