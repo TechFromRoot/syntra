@@ -582,7 +582,7 @@ export class SyntraBotService {
           }
           return await this.syntraBot.sendMessage(
             msg.chat.id,
-            'Transaction error, please Try again',
+            'Transaction error, please Try again.',
           );
         }
       }
