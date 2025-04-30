@@ -177,7 +177,8 @@ export class SyntraDexService {
         loadingMessage,
       );
       const regex =
-        /TransactionExpiredBlockheightExceededError: Signature (\w+) has expired: block height exceeded/;
+        /^Signature\s([a-zA-Z0-9]{87})\shas\sexpired:\sblock\sheight\sexceeded\.$/;
+
       const match = error.message.match(regex);
       if (match) {
         const signature = match[1];
@@ -222,6 +223,7 @@ export class SyntraDexService {
       let amount = (balance * parseFloat(amountPercent)) / 100;
       console.log('amount', amount);
       amount = this.truncateTo9Decimals(amount);
+      console.log('amount', amount);
 
       if (balance < amount) {
         await this.syntraBotService.deleteTransactionLoadingGif(
@@ -342,8 +344,10 @@ export class SyntraDexService {
         chatId,
         loadingMessage,
       );
+
       const regex =
-        /TransactionExpiredBlockheightExceededError: Signature (\w+) has expired: block height exceeded/;
+        /^Signature\s([a-zA-Z0-9]{87})\shas\sexpired:\sblock\sheight\sexceeded\.$/;
+
       const match = error.message.match(regex);
       if (match) {
         const signature = match[1];
@@ -409,6 +413,6 @@ export class SyntraDexService {
   };
 
   truncateTo9Decimals(num: number): number {
-    return Math.floor(num * 1e9) / 1e9;
+    return Math.floor(num * 1e6) / 1e6;
   }
 }

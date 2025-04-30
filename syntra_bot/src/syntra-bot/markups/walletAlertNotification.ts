@@ -24,9 +24,9 @@ export const walletAlertNotificationMarkup = async (
   lines.push(`🔔 <b>Transaction Alert</b>`);
   lines.push(`└ Wallet <code>${tokenAlert.walletAddress}</code>`);
   lines.push(
-    `  > ${tokenAlert.type} ${tokenAlert.amount} ${tokenAlert.mintAddress}`,
+    ` ➠ ${tokenAlert.type} ${tokenAlert.amount} ${tokenAlert.mintAddress}`,
   );
-  lines.push(`  > at ${formatBlockTime(tokenAlert.timestamp)}`);
+  lines.push(`  ➠ at ${formatBlockTime(tokenAlert.timestamp)}`);
   lines.push(`\n\nCA: <code>${tokenAlert.mintAddress}</code>`);
 
   const fullMessage = lines.join('\n');
