@@ -15,6 +15,7 @@ import { WalletModule } from 'src/wallet/wallet.module';
     ]),
     WalletModule,
   ],
+  exports: [SyntraDexService],
   providers: [SyntraDexService],
   controllers: [SyntraDexController],
 })

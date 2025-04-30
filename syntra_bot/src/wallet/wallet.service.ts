@@ -21,6 +21,7 @@ import {
   getAccount,
   createTransferInstruction,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token';
 
 dotenv.config();
@@ -204,6 +205,74 @@ export class WalletService {
       throw new Error(`Failed to fetch Token-2022 balance: ${error.message}`);
     }
   };
+
+  async getTokenAccounts(walletAddress) {
+    const connection = new Connection(
+      'https://api.mainnet-beta.solana.com',
+      'confirmed',
+    );
+    const publicKey = new PublicKey(walletAddress);
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+      publicKey,
+      {
+        programId: TOKEN_PROGRAM_ID,
+      },
+    );
+    return tokenAccounts.value;
+  }
+
+  //   async getTokenBalances(walletAddress) {
+  //     const tokenAccounts = await this.getTokenAccounts(walletAddress);
+
+  //     const tokenBalances = tokenAccounts.map((accountInfo) => {
+  //       const tokenAmount = accountInfo.account.data.parsed.info.tokenAmount;
+  //       const mintAddress = accountInfo.account.data.parsed.info.mint;
+  // if(tokenAmount.uiAmount > 0) {
+  //       return {
+  //         tokenMint: mintAddress, // Address of the token
+  //         amount: tokenAmount.uiAmount, // Amount of the token
+  //       };
+  //     })
+
+  //     return tokenBalances;
+  //   }
+
+  async getTokenBalances(walletAddress) {
+    const tokenAccounts = await this.getTokenAccounts(walletAddress);
+
+    const tokenBalances = tokenAccounts
+      .map((accountInfo) => {
+        const tokenAmount = accountInfo.account.data.parsed.info.tokenAmount;
+        const mintAddress = accountInfo.account.data.parsed.info.mint;
+
+        return {
+          tokenMint: mintAddress,
+          amount: tokenAmount.uiAmount,
+        };
+      })
+      .filter((token) => token.amount > 0); // Only keep tokens with balance > 0
+
+    return tokenBalances;
+  }
+
+  async getAllTokenAccounts(walletAddress) {
+    const connection = new Connection(
+      'https://api.mainnet-beta.solana.com',
+      'confirmed',
+    );
+    const publicKey = new PublicKey(walletAddress);
+
+    const [classic, token2022] = await Promise.all([
+      connection.getParsedTokenAccountsByOwner(publicKey, {
+        programId: TOKEN_PROGRAM_ID,
+      }),
+      connection.getParsedTokenAccountsByOwner(publicKey, {
+        programId: TOKEN_2022_PROGRAM_ID,
+      }),
+    ]);
+
+    return [...classic.value, ...token2022.value];
+  }
 
   transferSOL = async (
     privateKey: string,

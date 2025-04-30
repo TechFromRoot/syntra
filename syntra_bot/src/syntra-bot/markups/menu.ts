@@ -5,25 +5,9 @@ export const menuMarkup = async () => {
     keyboard: [
       [
         {
-          text: '💳 Wallet',
+          text: '💳 My Wallet',
           callback_data: JSON.stringify({
             command: '/walletFeatures',
-            language: 'english',
-          }),
-        },
-        {
-          text: '💱 Create Token',
-          callback_data: JSON.stringify({
-            command: '/createToken',
-            language: 'english',
-          }),
-        },
-      ],
-      [
-        {
-          text: 'Buy',
-          callback_data: JSON.stringify({
-            command: '/buyToken',
             language: 'english',
           }),
         },
@@ -36,13 +20,40 @@ export const menuMarkup = async () => {
         },
       ],
       [
-        // {
-        //   text: '🔔 Price Alerts',
-        //   callback_data: JSON.stringify({
-        //     command: '/priceAlerts',
-        //     language: 'english',
-        //   }),
-        // },
+        {
+          text: '🔎 Track a wallet',
+          callback_data: JSON.stringify({
+            command: '/trackWallet',
+            language: 'english',
+          }),
+        },
+      ],
+      [
+        {
+          text: '👀 View Wallets You’re Tracking',
+          callback_data: JSON.stringify({
+            command: '/trackWallet',
+            language: 'english',
+          }),
+        },
+      ],
+      [
+        {
+          text: 'Analyse a token',
+          callback_data: JSON.stringify({
+            command: '/analyse',
+            language: 'english',
+          }),
+        },
+        {
+          text: 'Buy a token',
+          callback_data: JSON.stringify({
+            command: '/buyToken',
+            language: 'english',
+          }),
+        },
+      ],
+      [
         {
           text: '📜 Transaction History',
           callback_data: JSON.stringify({
@@ -63,13 +74,13 @@ export const menuMarkup = async () => {
           text: '📢 Share',
           language: 'english',
           switch_inline_query:
-            'RESObot, the ultimate trading bot for Sonic SVM!',
+            'Syntra, your all-in-one wallet alert tracker and copy trading bot!',
         },
       ],
       [
         {
           text: '❓ Help & Support',
-          url: `https://t.me/+uvluoEnCbiU5YTBk`,
+          url: `https://t.me/+UjRn5s2GGYFkOTM0`,
         },
       ],
     ],

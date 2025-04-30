@@ -6,11 +6,27 @@ import {
   welcomeMessageMarkup,
   tokenDisplayMarkup,
   menuMarkup,
+  walletFeaturesMarkup,
+  exportWalletWarningMarkup,
+  displayPrivateKeyMarkup,
+  resetWalletWarningMarkup,
+  manageAssetMarkup,
+  settingsMarkup,
+  sellTokenMarkup,
 } from './markups';
 import { InjectModel } from '@nestjs/mongoose';
-import { User } from 'src/database/schemas/user.schema';
+import { User, UserDocument } from 'src/database/schemas/user.schema';
 import { Model } from 'mongoose';
 import { WalletService } from 'src/wallet/wallet.service';
+import { Session, SessionDocument } from 'src/database/schemas/session.schema';
+// import { TokenData } from 'src/vybe-integration/interfaces';
+import { Assets } from 'src/database/schemas/userAsset.schema';
+import { SyntraDexService } from 'src/syntra-dex/syntra-dex.service';
+
+interface Token {
+  tokenMint: string;
+  amount: number;
+}
 
 const token = process.env.TELEGRAM_TOKEN;
 @Injectable()
@@ -22,7 +38,10 @@ export class SyntraBotService {
     private readonly httpService: HttpService,
     private readonly walletService: WalletService,
     private readonly vybeService: VybeIntegrationService,
+    private readonly syntraDexService: SyntraDexService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel(Session.name) private readonly sessionModel: Model<Session>,
+    @InjectModel(Assets.name) private readonly assetsModel: Model<Assets>,
   ) {
     this.syntraBot = new TelegramBot(token, { polling: true });
     this.syntraBot.on('message', this.handleRecievedMessages);
@@ -36,17 +55,94 @@ export class SyntraBotService {
         return;
       }
 
+      const [user, session] = await Promise.all([
+        this.userModel.findOne({ chatId: msg.chat.id }),
+        this.sessionModel.findOne({ chatId: msg.chat.id }),
+      ]);
+
       console.log(msg.text);
       const command = msg.text.trim();
       const mintRegex = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/;
       const match = command.match(mintRegex);
+      const regexAmount = /^\d+(\.\d+)?$/;
       const regexTrade = /^\/start ca-([a-zA-Z0-9]+)$/;
       const matchTrade = msg.text.trim().match(regexTrade);
+      const regexPosition = /\/start\s+position_([a-zA-Z0-9]{43,})/;
+      const matchPosition = msg.text.trim().match(regexPosition);
       //   const deleteRegexTrack = /^\/start del-([a-zA-Z0-9]+)$/;
       //   const matchDelete = msg.text.trim().match(deleteRegexTrack);
       const regexX = /^\/start x-([1-9A-HJ-NP-Za-km-z]{32,44})$/;
       const matchX = msg.text.trim().match(regexX);
 
+      if (matchPosition) {
+        let loadingGif;
+        try {
+          await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
+          const supportedTokens =
+            await this.syntraDexService.fetchSupportedTokenPrice(
+              matchPosition[1],
+            );
+
+          loadingGif = await this.syntraBot.sendAnimation(
+            msg.chat.id,
+            'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2Q0aG52b3pmNm1iNWxyb254aHRnbWxvYzJjbDA4NzBwejBwdGZjZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xTk9ZvMnbIiIew7IpW/giphy.gif',
+            {
+              caption: 'loading token data...',
+            },
+          );
+          const tokenData = await this.vybeService.getTokenDetails(
+            matchPosition[1],
+          );
+          console.log('supportedTokens:', supportedTokens);
+          if (supportedTokens && tokenData) {
+            const { balance: tokenBalance } =
+              await this.walletService.getSPLTokenBalance(
+                user.solWalletAddress,
+                matchPosition[1],
+                process.env.SOLANA_RPC,
+                tokenData.decimal,
+              );
+            const { balance: solBalance } =
+              await this.walletService.getSolBalance(
+                user.solWalletAddress,
+                process.env.SOLANA_RPC,
+              );
+
+            const buyToken = await sellTokenMarkup(
+              tokenData,
+              tokenBalance,
+              solBalance,
+            );
+            const replyMarkup = { inline_keyboard: buyToken.keyboard };
+            await this.syntraBot.sendMessage(msg.chat.id, buyToken.message, {
+              reply_markup: replyMarkup,
+              parse_mode: 'HTML',
+            });
+            await this.syntraBot.deleteMessage(
+              msg.chat.id,
+              loadingGif.message_id,
+            );
+            return;
+          }
+          console.log('contract address :', matchPosition[1]);
+          await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
+          await this.syntraBot.sendMessage(
+            msg.chat.id,
+            'Token not found/ supported',
+          );
+          await this.syntraBot.deleteMessage(
+            msg.chat.id,
+            loadingGif.message_id,
+          );
+          return;
+        } catch (error) {
+          console.error(error);
+          await this.syntraBot.deleteMessage(
+            msg.chat.id,
+            loadingGif.message_id,
+          );
+        }
+      }
       if (matchTrade) {
         await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
 
@@ -156,8 +252,90 @@ export class SyntraBotService {
           this.logger.warn(error);
         }
       }
+      if (regexAmount.test(msg.text.trim()) && session.buySlippage) {
+        // Handle text inputs if not a command
+        return this.handleUserTextInputs(msg, session!);
+      }
+      if (regexAmount.test(msg.text.trim()) && session.sellSlippage) {
+        // Handle text inputs if not a command
+        return this.handleUserTextInputs(msg, session!);
+      }
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  //handler for users inputs
+  handleUserTextInputs = async (
+    msg: TelegramBot.Message,
+    session?: SessionDocument,
+    // user?: UserDocument,
+  ) => {
+    await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
+    try {
+      const regexAmount = /^\d+(\.\d+)?$/;
+      console.log(msg.text.trim());
+
+      if (regexAmount.test(msg.text.trim()) && session.buySlippage) {
+        const updatedUser = await this.userModel.findOneAndUpdate(
+          { chatId: msg.chat.id },
+          { buySlippage: msg.text.trim() },
+          { new: true },
+        );
+        if (updatedUser) {
+          const setting = await settingsMarkup(
+            updatedUser.buySlippage,
+            updatedUser.sellSlippage,
+          );
+          const replyMarkup = { inline_keyboard: setting.keyboard };
+
+          await this.syntraBot.editMessageReplyMarkup(replyMarkup, {
+            chat_id: msg.chat.id,
+            message_id: session.messageId,
+          });
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            `✅ Buy Slippage set to ${msg.text.trim()}%`,
+          );
+        }
+        return;
+      }
+      if (regexAmount.test(msg.text.trim()) && session.sellSlippage) {
+        const updatedUser = await this.userModel.findOneAndUpdate(
+          { chatId: msg.chat.id },
+          { sellSlippage: msg.text.trim() },
+          { new: true },
+        );
+        if (updatedUser) {
+          const setting = await settingsMarkup(
+            updatedUser.buySlippage,
+            updatedUser.sellSlippage,
+          );
+          const replyMarkup = { inline_keyboard: setting.keyboard };
+
+          await this.syntraBot.editMessageReplyMarkup(replyMarkup, {
+            chat_id: msg.chat.id,
+            message_id: session.messageId,
+          });
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            `✅ Sell Slippage set to ${msg.text.trim()}%`,
+          );
+        }
+        return;
+      }
+
+      if (session) {
+        // update users answerId
+        await this.sessionModel.updateOne(
+          { _id: session._id },
+          { $push: { userInputId: msg.message_id } },
+        );
+      }
+
+      // parse incoming message and handle commands
+    } catch (error) {
+      console.log(error);
     }
   };
 
@@ -167,6 +345,7 @@ export class SyntraBotService {
     let tokenAddress: string;
     let buy_addressCommand: string;
     const currentText = query.message!.text || '';
+    let parsedData;
     // console.log(currentText);
 
     function isJSON(str) {
@@ -180,7 +359,7 @@ export class SyntraBotService {
     }
 
     if (isJSON(query.data)) {
-      const parsedData = JSON.parse(query.data);
+      parsedData = JSON.parse(query.data);
       if (parsedData.c) {
         buy_addressCommand = parsedData.c;
         [command, tokenAddress] = buy_addressCommand.split('|');
@@ -196,6 +375,8 @@ export class SyntraBotService {
 
     try {
       console.log(command);
+      const user = await this.userModel.findOne({ chatId: chatId });
+      let session: SessionDocument;
       switch (command) {
         case '/menu':
           await this.syntraBot.sendChatAction(query.message.chat.id, 'typing');
@@ -267,12 +448,303 @@ export class SyntraBotService {
           }
           break;
 
+        case '/walletFeatures':
+          await this.syntraBot.sendChatAction(chatId, 'typing');
+          try {
+            const { balance } = await this.walletService.getSolBalance(
+              user.solWalletAddress,
+              process.env.SOLANA_RPC,
+            );
+            await this.sendAllWalletFeature(chatId, user, balance);
+            return;
+          } catch (error) {
+            console.log(error);
+            return;
+          }
+
+        case '/fundWallet':
+          try {
+            await this.syntraBot.sendChatAction(
+              query.message.chat.id,
+              'typing',
+            );
+
+            if (user?.solWalletAddress) {
+              const { balance } = await this.walletService.getSolBalance(
+                user.solWalletAddress,
+                process.env.SOLANA_RPC,
+              );
+              let message = 'Your wallet Address:\n';
+
+              if (user?.solWalletAddress) {
+                message += `<b><code>${user.solWalletAddress}</code></b>\nbalance: ${balance} SOL\n\n`;
+              }
+
+              message += 'Send SOL to your address above.';
+
+              return await this.syntraBot.sendMessage(chatId, message, {
+                parse_mode: 'HTML',
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      {
+                        text: 'Close ❌',
+                        callback_data: JSON.stringify({
+                          command: '/close',
+                          language: 'english',
+                        }),
+                      },
+                    ],
+                  ],
+                },
+              });
+            }
+            return await this.syntraBot.sendMessage(
+              chatId,
+              'You dont have any wallet Address to fund',
+            );
+          } catch (error) {
+            console.log(error);
+            return;
+          }
+
+        case '/exportWallet':
+          if (!user!.solWalletAddress) {
+            return this.syntraBot.sendMessage(
+              chatId,
+              `You Don't have a wallet`,
+            );
+          }
+          return this.showExportWalletWarning(chatId);
+
+        case '/confirmExportWallet':
+          // delete any existing session if any
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          // create a new session
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            exportWallet: true,
+          });
+          if (session && user!.solWalletDetails) {
+            let decryptedSVMWallet;
+            if (user!.solWalletDetails) {
+              decryptedSVMWallet = await this.walletService.decryptSVMWallet(
+                process.env.DEFAULT_WALLET_PIN!,
+                user!.solWalletDetails,
+              );
+            }
+
+            if (decryptedSVMWallet.privateKey) {
+              const latestSession = await this.sessionModel.findOne({
+                chatId: chatId,
+              });
+              const deleteMessagesPromises = [
+                ...latestSession!.userInputId.map((id) =>
+                  this.syntraBot.deleteMessage(chatId, id),
+                ),
+              ];
+
+              // Execute all deletions concurrently
+              await Promise.all(deleteMessagesPromises);
+
+              // Display the decrypted private key to the user
+              await this.displayWalletPrivateKey(
+                chatId,
+                decryptedSVMWallet.privateKey || '',
+              );
+
+              return;
+            }
+
+            // Delete the session after operations
+            await this.sessionModel.deleteMany({ chatId: chatId });
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
+        case '/resetWallet':
+          return this.showResetWalletWarning(chatId);
+
+        case '/confirmReset':
+          // delete any existing session if any
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          // create a new session
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            resetWallet: true,
+          });
+          if (session) {
+            try {
+              await this.syntraBot.sendChatAction(chatId, 'typing');
+              if (!user) {
+                return await this.syntraBot.sendMessage(
+                  chatId,
+                  'User not found. click /start.',
+                );
+              }
+
+              const newSVMWallet = await this.walletService.createSVMWallet();
+              const [encryptedSVMWalletDetails] = await Promise.all([
+                this.walletService.encryptSVMWallet(
+                  process.env.DEFAULT_WALLET_PIN!,
+                  newSVMWallet.privateKey,
+                ),
+              ]);
+
+              await this.userModel.updateOne(
+                { chatId: chatId },
+                {
+                  $set: {
+                    solWalletAddress: newSVMWallet.address,
+                    solWalletDetails: encryptedSVMWalletDetails.json,
+                  },
+                },
+              );
+
+              await this.syntraBot.sendMessage(
+                chatId,
+                `Wallet deleted successfully.\n\n your new wallet: <code>${newSVMWallet.address}</code>`,
+                { parse_mode: 'HTML' },
+              );
+              await this.sessionModel.deleteMany({ chatId: chatId });
+              return;
+            } catch (error) {
+              console.log(error);
+            }
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
+        case '/manageAsset':
+          if (!user?.solWalletAddress) {
+            return this.syntraBot.sendMessage(
+              chatId,
+              `You don't have any wallet connected`,
+            );
+          }
+          await this.getUserAssets(chatId, user.solWalletAddress);
+          await this.displayWalletAssets(chatId, user.solWalletAddress);
+          return;
+
+        case '/refreshAsset':
+          if (!user?.solWalletAddress) {
+            return this.syntraBot.sendMessage(
+              chatId,
+              `You don't have any wallet connected`,
+            );
+          }
+          await this.syntraBot.sendChatAction(chatId, 'typing');
+          await this.syntraBot.deleteMessage(
+            query.message.chat.id,
+            query.message.message_id,
+          );
+          await this.getUserAssets(chatId, user.solWalletAddress);
+          await this.displayWalletAssets(chatId, user.solWalletAddress);
+          return;
+
+        case '/next':
+          if (!user?.solWalletAddress) {
+            return this.syntraBot.sendMessage(
+              chatId,
+              `You don't have any wallet connected`,
+            );
+          }
+          const nextPage = parsedData.page;
+          console.log(nextPage);
+          const nextPageAssets = await this.displayWalletAssets(
+            chatId,
+            user.solWalletAddress,
+            nextPage,
+          );
+          console.log(nextPageAssets);
+          return;
+
+        case '/prev':
+          if (!user?.solWalletAddress) {
+            return this.syntraBot.sendMessage(
+              chatId,
+              `You don't have any wallet connected`,
+            );
+          }
+          const prevPage = parsedData.page;
+          console.log(prevPage);
+          const prevPageAssets = await this.displayWalletAssets(
+            chatId,
+            user.solWalletAddress,
+            prevPage,
+          );
+          console.log(prevPageAssets);
+          return;
+
+        case '/settings':
+          const setting = await settingsMarkup(
+            user.buySlippage,
+            user.sellSlippage,
+          );
+          const replyMarkup = { inline_keyboard: setting.keyboard };
+
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            setting.message,
+            { reply_markup: replyMarkup, parse_mode: 'HTML' },
+          );
+
+        case '/buySlippage':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            buySlippage: true,
+            messageId: messageId,
+          });
+          if (session) {
+            await this.promptBuySlippage(chatId);
+            return;
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
+        case '/sellSlippage':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            sellSlippage: true,
+            messageId: messageId,
+          });
+          if (session) {
+            await this.promptSellSlippage(chatId);
+            return;
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
         case '/close':
           await this.syntraBot.sendChatAction(query.message.chat.id, 'typing');
           return await this.syntraBot.deleteMessage(
             query.message.chat.id,
             query.message.message_id,
           );
+
+        //   close opened markup and delete session
+        case '/closeDelete':
+          await this.syntraBot.sendChatAction(query.message.chat.id, 'typing');
+          await this.sessionModel.deleteMany({
+            chatId: chatId,
+          });
+          return await this.syntraBot.deleteMessage(
+            query.message.chat.id,
+            query.message.message_id,
+          );
+
+        case '/neutral':
+          return;
 
         default:
           return await this.syntraBot.sendMessage(
@@ -297,8 +769,8 @@ export class SyntraBotService {
       const user = new this.userModel({
         chatId: chat_id,
         userName: username,
-        svmWalletAddress: newSVMWallet.address,
-        svmWalletDetails: encryptedSVMWalletDetails.json,
+        solWalletAddress: newSVMWallet.address,
+        solWalletDetails: encryptedSVMWalletDetails.json,
       });
 
       return await user.save();
@@ -307,7 +779,227 @@ export class SyntraBotService {
     }
   };
 
-  normalizeHtml(input: string): string {
+  sendAllWalletFeature = async (
+    chatId: any,
+    user: UserDocument,
+    balance: number,
+  ) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      const allWalletFeatures = await walletFeaturesMarkup(user, balance);
+      if (allWalletFeatures) {
+        const replyMarkup = {
+          inline_keyboard: allWalletFeatures.keyboard,
+        };
+        await this.syntraBot.sendMessage(chatId, allWalletFeatures.message, {
+          parse_mode: 'HTML',
+          reply_markup: replyMarkup,
+        });
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  showExportWalletWarning = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      const showExportWarning = await exportWalletWarningMarkup();
+      if (showExportWarning) {
+        const replyMarkup = { inline_keyboard: showExportWarning.keyboard };
+
+        return await this.syntraBot.sendMessage(
+          chatId,
+          showExportWarning.message,
+          {
+            parse_mode: 'HTML',
+            reply_markup: replyMarkup,
+          },
+        );
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  displayWalletPrivateKey = async (
+    chatId: TelegramBot.ChatId,
+    privateKeySVM: string,
+  ) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      const displayPrivateKey = await displayPrivateKeyMarkup(privateKeySVM);
+      if (displayPrivateKey) {
+        const replyMarkup = { inline_keyboard: displayPrivateKey.keyboard };
+
+        const sendPrivateKey = await this.syntraBot.sendMessage(
+          chatId,
+          displayPrivateKey.message,
+          {
+            parse_mode: 'HTML',
+            reply_markup: replyMarkup,
+          },
+        );
+        if (sendPrivateKey) {
+          // Delay the message deletion by 1 minute
+          setTimeout(async () => {
+            try {
+              // Delete the message after 1 minute
+              await this.syntraBot.deleteMessage(
+                chatId,
+                sendPrivateKey.message_id,
+              );
+            } catch (error) {
+              console.error('Error deleting message:', error);
+            }
+          }, 60000);
+        }
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  showResetWalletWarning = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      const showResetWarning = await resetWalletWarningMarkup();
+      if (showResetWarning) {
+        const replyMarkup = { inline_keyboard: showResetWarning.keyboard };
+
+        return await this.syntraBot.sendMessage(
+          chatId,
+          showResetWarning.message,
+          {
+            parse_mode: 'HTML',
+            reply_markup: replyMarkup,
+          },
+        );
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  displayWalletAssets = async (
+    chatId: TelegramBot.ChatId,
+    address: string,
+    page: number = 1,
+  ) => {
+    const loadingGif = await this.syntraBot.sendAnimation(
+      chatId,
+      'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExd2Q0aG52b3pmNm1iNWxyb254aHRnbWxvYzJjbDA4NzBwejBwdGZjZSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xTk9ZvMnbIiIew7IpW/giphy.gif',
+      {
+        caption: 'Fetching data...',
+      },
+    );
+
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+
+      const { balance } = await this.walletService.getSolBalance(
+        address,
+        process.env.SOLANA_RPC,
+      );
+      const userAssets = await this.assetsModel.findOne({
+        chatId: chatId,
+      });
+      if (!userAssets || !userAssets.assets.length) {
+        return await this.syntraBot.sendMessage(chatId, 'No assets found.');
+      }
+      const allAssets = userAssets.assets;
+      const totalAssets = allAssets.length;
+      const pageSize = 10;
+
+      const start = (page - 1) * pageSize;
+      const end = Math.min(start + pageSize, totalAssets);
+      const currentBatch = allAssets.slice(start, end);
+
+      const assetDetails = await Promise.allSettled(
+        currentBatch.map((asset: Token) =>
+          this.vybeService.getTokenDetails(asset.tokenMint).then((details) => ({
+            tokenMint: asset.tokenMint,
+            amount: asset.amount,
+            ...details,
+          })),
+        ),
+      );
+      const successful = assetDetails
+        .filter((res) => res.status === 'fulfilled')
+        .map((res) => (res as PromiseFulfilledResult<any>).value);
+      // const failed = assetDetails
+      //   .filter((res) => res.status === 'rejected')
+      //   .map((res) => (res as PromiseRejectedResult).reason);
+
+      const remaining = totalAssets - end;
+      const assetMarkup = await manageAssetMarkup(
+        successful,
+        balance,
+        page,
+        remaining,
+      );
+
+      const replyMarkup = { inline_keyboard: assetMarkup.keyboard };
+      const message = assetMarkup.message;
+
+      await this.syntraBot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+        reply_markup: replyMarkup,
+      });
+      await this.syntraBot.deleteMessage(chatId, loadingGif.message_id);
+    } catch (error) {
+      console.log(error);
+      await this.syntraBot.deleteMessage(chatId, loadingGif.message_id);
+    }
+  };
+
+  getUserAssets = async (chatId: TelegramBot.ChatId, wallet: string) => {
+    try {
+      await this.syntraBot.sendChatAction(chatId, 'typing');
+      const walletAssets = await this.walletService.getTokenBalances(wallet);
+      return await this.assetsModel.findOneAndUpdate(
+        { chatId },
+        { $set: { assets: walletAssets } },
+        { upsert: true, new: true },
+      );
+    } catch (error) {
+      console.log('General error in showBalance:', error);
+    }
+  };
+
+  promptBuySlippage = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendMessage(
+        chatId,
+        `Reply with your new slippage setting for buys in % (0 - 100%). Example: 10`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  promptSellSlippage = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendMessage(
+        chatId,
+        `Reply with your new slippage setting for sells in % (0 - 100%). Example: 10`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  private normalizeHtml(input: string): string {
     return (
       input
         // Remove all HTML tags

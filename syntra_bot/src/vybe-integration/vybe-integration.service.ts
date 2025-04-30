@@ -45,4 +45,34 @@ export class VybeIntegrationService {
 
     return { tokenDetail, topHolders };
   }
+
+  async getTokenDetails(mint: string): Promise<TokenData | undefined> {
+    const [tokenResult] = await Promise.allSettled([
+      this.httpService.axiosRef.get(
+        `https://api.vybenetwork.xyz/token/${mint}`,
+        {
+          headers: {
+            'X-API-KEY': process.env.VYBE_API_KEY,
+          },
+        },
+      ),
+      this.httpService.axiosRef.get(
+        `https://api.vybenetwork.xyz/token/${mint}/top-holders`,
+        {
+          headers: {
+            'X-API-KEY': process.env.VYBE_API_KEY,
+          },
+        },
+      ),
+    ]);
+
+    const tokenData =
+      tokenResult.status === 'fulfilled' && !tokenResult.value.data.error
+        ? tokenResult.value.data
+        : null;
+
+    const tokenDetail: TokenData | null = tokenData;
+
+    return tokenDetail;
+  }
 }
