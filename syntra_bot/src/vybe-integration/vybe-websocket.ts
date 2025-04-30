@@ -31,33 +31,52 @@ export class VybeWebSocketService {
 
   private async configureFilters(): Promise<void> {
     // const walletAddresses = await this.getTrackedWallets();
+
     // if (!walletAddresses.length) {
     //   this.logger.warn('No wallets to track.');
     //   return;
     // }
-    const walletAddresses = ['8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW'];
+    const walletAddresses = [
+      '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
+      '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
+      'JD6rVaerbyz6wjQ433nrw6bFTgFrp46MiYmi8EtUAfsG',
+      'Cy4YveF3TX6WZBVWbCDPHE4vLa1a9ZLngZqykrVEsBku',
+    ];
     const configureMessage = JSON.stringify({
       type: 'configure',
       filters: {
-        // transfers: walletAddresses.map((walletAddress) => ({
-        //   senderAddress: walletAddress, // Track as sender (sell)
-        //   receiverAddress: walletAddress, // Track as receiver (buy)
-        // })),
+        trades: walletAddresses.map((walletAddress) => ({
+          feePayer: walletAddress,
+        })),
         // trades: [
         //   {
         //     authorityAddress: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
         //   },
         //   { feePayer: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW' },
         // ],
-        transfers: [],
-        trades: [
-          {
-            // tokenMintAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-            // programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
-            authorityAddress: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
-            feePayer: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
-          },
-        ],
+        // transfers: [
+        //   {
+        //     // tokenMintAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+        //     feePayer: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
+
+        //     // authorityAddress: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
+        //     // feePayer: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
+        //   },
+        // ],
+        // trades: [
+        //   { feePayer: 'JD6rVaerbyz6wjQ433nrw6bFTgFrp46MiYmi8EtUAfsG' },
+        //   {
+        //     feePayer: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
+        //   },
+        // ],
+        // trades: [
+        //   {
+        //     // tokenMintAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+        //     // programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+        //     authorityAddress: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
+        //     feePayer: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
+        //   },
+        // ],
       },
     });
     this.ws?.send(configureMessage);

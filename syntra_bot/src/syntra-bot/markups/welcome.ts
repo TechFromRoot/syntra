@@ -4,15 +4,17 @@ export const welcomeMessageMarkup = async (userName: string) => {
     keyboard: [
       [
         {
+          text: 'Get started 🚀',
+          callback_data: JSON.stringify({
+            command: `/menu`,
+          }),
+        },
+      ],
+      [
+        {
           text: '➕ Add to Group',
           url: `${process.env.BOT_URL}?startgroup=true`,
         },
-        // {
-        //   text: 'commands',
-        //   callback_data: JSON.stringify({
-        //     c: `/commands`,
-        //   }),
-        // },
       ],
     ],
   };

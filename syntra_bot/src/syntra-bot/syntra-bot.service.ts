@@ -2,7 +2,11 @@ import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import * as TelegramBot from 'node-telegram-bot-api';
 import { VybeIntegrationService } from 'src/vybe-integration/vybe-integration.service';
-import { welcomeMessageMarkup, tokenDisplayMarkup } from './markups';
+import {
+  welcomeMessageMarkup,
+  tokenDisplayMarkup,
+  menuMarkup,
+} from './markups';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from 'src/database/schemas/user.schema';
 import { Model } from 'mongoose';
@@ -63,7 +67,7 @@ export class SyntraBotService {
             { parse_mode: 'HTML', reply_markup: replyMarkup },
           );
         }
-        const saved = await this.saveUserToDB(msg.chat.id);
+        const saved = await this.saveUserToDB(msg.chat.id, username);
 
         const welcome = await welcomeMessageMarkup(username);
         const replyMarkup = { inline_keyboard: welcome.keyboard };
@@ -163,7 +167,7 @@ export class SyntraBotService {
     let tokenAddress: string;
     let buy_addressCommand: string;
     const currentText = query.message!.text || '';
-    console.log(currentText);
+    // console.log(currentText);
 
     function isJSON(str) {
       try {
@@ -180,6 +184,8 @@ export class SyntraBotService {
       if (parsedData.c) {
         buy_addressCommand = parsedData.c;
         [command, tokenAddress] = buy_addressCommand.split('|');
+      } else if (parsedData.command) {
+        command = parsedData.command;
       }
     } else {
       command = query.data;
@@ -189,7 +195,24 @@ export class SyntraBotService {
     const messageId = query.message.message_id;
 
     try {
+      console.log(command);
       switch (command) {
+        case '/menu':
+          await this.syntraBot.sendChatAction(query.message.chat.id, 'typing');
+          const allFeatures = await menuMarkup();
+          if (allFeatures) {
+            const replyMarkup = { inline_keyboard: allFeatures.keyboard };
+            return await this.syntraBot.sendMessage(
+              chatId,
+              allFeatures.message,
+              {
+                parse_mode: 'HTML',
+                reply_markup: replyMarkup,
+              },
+            );
+          }
+          return;
+
         case '/refresh':
           await this.syntraBot.sendChatAction(chatId, 'typing');
           const loadingGif = await this.syntraBot.sendAnimation(
@@ -262,7 +285,7 @@ export class SyntraBotService {
     }
   };
 
-  saveUserToDB = async (chat_id: number, platform = 'telegram') => {
+  saveUserToDB = async (chat_id: number, username: string) => {
     try {
       const newSVMWallet = await this.walletService.createSVMWallet();
       const [encryptedSVMWalletDetails] = await Promise.all([
@@ -273,7 +296,7 @@ export class SyntraBotService {
       ]);
       const user = new this.userModel({
         chatId: chat_id,
-        platform,
+        userName: username,
         svmWalletAddress: newSVMWallet.address,
         svmWalletDetails: encryptedSVMWalletDetails.json,
       });
