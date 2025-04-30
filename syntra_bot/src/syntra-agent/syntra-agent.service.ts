@@ -44,7 +44,7 @@ export class SyntraAgentService {
                 return 'Insufficient balance.';
             }
 
-            const swapResponse = await this.getSwapQuote(inputMint, outputMint, Number(amount) * inputTokenDetails.decimals);
+            const swapResponse = await this.getSwapQuote(inputMint, outputMint, Number(amount) * 10 ** inputTokenDetails.decimals);
 
             const connection = new Connection(
                 process.env.SOLANA_RPC,
@@ -66,6 +66,20 @@ export class SyntraAgentService {
 
             const txVersion: string = 'V0';
 
+            const inputAccount = await getOrCreateAssociatedTokenAccount(
+                connection,
+                userAccount,
+                new PublicKey(inputMint),
+                userAddress,
+            );
+
+            const outputAccount = await getOrCreateAssociatedTokenAccount(
+                connection,
+                userAccount,
+                new PublicKey(outputMint),
+                userAddress,
+            );
+
             const swapTrx = await firstValueFrom(
                 this.httpService.post(swapUrl, {
                     computeUnitPriceMicroLamports: String(data.data.default.h),
@@ -74,9 +88,9 @@ export class SyntraAgentService {
                     wallet: userAddress,
                     wrapSol: true,
                     unwrapSol: false,
-                    inputAccount: undefined,
-                    outputAccount: userAddress
-                }),
+                    inputAccount: inputAccount.address.toBase58(),
+                    outputAccount: outputAccount.address.toBase58()
+                })
             );
 
             // Decode the base64 transaction
@@ -129,10 +143,10 @@ export class SyntraAgentService {
             });
             await transactionDetails.save();
 
-            return `https://explorer.sonic.game/tx/${signature}?cluster=mainnet-alpha`;
+            return `https://explorer.solana.com/tx/${signature}?cluster=mainnet`;
         } catch (error: any) {
             console.error('Error in swapToken:', error);
-            return 'Error buying token. Please confirm you have enough balance and try again.';
+            return `Error buying token: ${error.message}`;
         }
     }
 
@@ -154,8 +168,8 @@ export class SyntraAgentService {
             const { balance } = await this.walletService.getToken2022Balance(
                 String(userAddress),
                 inputMint,
-                process.env.SONIC_RPC,
-                Number(inputTokenDetails.decimal),
+                process.env.SOLANA_RPC,
+                Number(inputTokenDetails.decimals),
                 inputTokenDetails.programId
             );
 
@@ -165,7 +179,7 @@ export class SyntraAgentService {
                 return 'Insufficient balance.';
             }
 
-            const swapResponse = await this.getSwapQuote(inputMint, outputMint, Number(amount) * inputTokenDetails.decimals);
+            const swapResponse = await this.getSwapQuote(inputMint, outputMint, Number(amount) * 10 ** inputTokenDetails.decimals);
 
             const connection = new Connection(
                 process.env.SOLANA_RPC,
@@ -180,6 +194,20 @@ export class SyntraAgentService {
 
             const txVersion: string = 'V0';
 
+            const inputAccount = await getOrCreateAssociatedTokenAccount(
+                connection,
+                userAccount,
+                new PublicKey(inputMint),
+                userAddress,
+            );
+
+            const outputAccount = await getOrCreateAssociatedTokenAccount(
+                connection,
+                userAccount,
+                new PublicKey(outputMint),
+                userAddress,
+            );
+
             const swapTrx = await firstValueFrom(
                 this.httpService.post(swapUrl, {
                     computeUnitPriceMicroLamports: String(data.data.default.h),
@@ -188,8 +216,8 @@ export class SyntraAgentService {
                     wallet: userAddress,
                     wrapSol: false,
                     unwrapSol: true,
-                    inputAccount: userAddress,
-                    outputAccount: undefined
+                    inputAccount: inputAccount.address.toBase58(),
+                    outputAccount: outputAccount.address.toBase58()
                 }),
             );
 
@@ -242,24 +270,27 @@ export class SyntraAgentService {
                 hash: signature,
             });
             await transactionDetails.save();
-            return `https://explorer.sonic.game/tx/${signature}?cluster=mainnet-alpha`;
+
+            return `https://explorer.solana.com/tx/${signature}?cluster=mainnet`;
         } catch (error: any) {
             console.error('Error in swapToken:', error);
-            return 'Error selling token. Please confirm you have enough balance/gas fee and try again.';
+            return `Error selling token: ${error.message}`;
         }
     }
 
     async getSwapQuote(inputMint: string, outputMint: string, amountInDecimals: number) {
-        const slippage = 0.1;
+        const slippage = 0.5;
         const txVersion = 'V0';
-
-        console.log(API_URLS.SWAP_HOST);
 
         const swapComputeUrl = `https://transaction-v1.raydium.io/compute/swap-base-in?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountInDecimals}&slippageBps=${slippage * 100}&txVersion=${txVersion}`
 
         const { data: swapResponse } = await firstValueFrom(
             this.httpService.get(swapComputeUrl),
         );
+
+        if (swapResponse.success === false) {
+            throw new Error(`Swap failed: ${swapResponse.msg}`);
+        }
 
         return swapResponse;
     }
