@@ -20,9 +20,9 @@ import {
 @Module({
   imports: [
     HttpModule,
-    VybeIntegrationModule,
     WalletModule,
     forwardRef(() => SyntraDexModule),
+    forwardRef(() => VybeIntegrationModule),
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     MongooseModule.forFeature([{ name: Session.name, schema: SessionSchema }]),
     MongooseModule.forFeature([{ name: Assets.name, schema: AssetsSchema }]),

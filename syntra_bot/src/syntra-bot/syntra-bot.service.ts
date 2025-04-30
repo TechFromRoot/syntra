@@ -21,6 +21,7 @@ import {
   sellTokenMarkup,
   buyTokenMarkup,
   transactionHistoryMarkup,
+  walletAlertNotificationMarkup,
 } from './markups';
 import { InjectModel } from '@nestjs/mongoose';
 import { User, UserDocument } from 'src/database/schemas/user.schema';
@@ -35,6 +36,8 @@ import {
   TrackedWallet,
   TrackedWalletDocument,
 } from 'src/database/schemas/trackedWallet.schema';
+import { VybeWebSocketService } from 'src/vybe-integration/vybe-websocket';
+import { TrackingAlert } from 'src/vybe-integration/interfaces';
 
 interface Token {
   tokenMint: string;
@@ -50,7 +53,10 @@ export class SyntraBotService {
   constructor(
     private readonly httpService: HttpService,
     private readonly walletService: WalletService,
+    @Inject(forwardRef(() => VybeIntegrationService))
     private readonly vybeService: VybeIntegrationService,
+    @Inject(forwardRef(() => VybeWebSocketService))
+    private readonly vybeWebsocketService: VybeWebSocketService,
     @Inject(forwardRef(() => SyntraDexService))
     private readonly syntraDexService: SyntraDexService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
@@ -93,7 +99,7 @@ export class SyntraBotService {
       const matchX = msg.text.trim().match(regexX);
       const matchTrack = msg.text.trim().match(/\/track\s+(\w{32,44})/);
 
-      if (matchTrack) {
+      if (matchTrack && msg.chat.type === 'private') {
         await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
         const wallet = await this.addOrUpdateTrackedWallets(
           matchTrack[1],
@@ -242,7 +248,7 @@ export class SyntraBotService {
           msg.chat.id,
         );
       }
-      if (command === '/start') {
+      if (command === '/start' && msg.chat.type === 'private') {
         const username = `${msg.from.username}`;
         const userExist = await this.userModel.findOne({ chatId: msg.chat.id });
         if (userExist) {
@@ -275,7 +281,7 @@ export class SyntraBotService {
           );
         }
       }
-      if (command === '/menu') {
+      if (command === '/menu' && msg.chat.type === 'private') {
         await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
         const allFeatures = await menuMarkup();
         if (allFeatures) {
@@ -291,7 +297,7 @@ export class SyntraBotService {
         }
         return;
       }
-      if (command === '/cancel') {
+      if (command === '/cancel' && msg.chat.type === 'private') {
         await this.sessionModel.deleteMany({ chatId: msg.chat.id });
         return await this.syntraBot.sendMessage(
           msg.chat.id,
@@ -307,7 +313,7 @@ export class SyntraBotService {
         if (matchX) {
           await this.syntraBot.deleteMessage(msg.chat.id, msg.message_id);
         }
-        if (session.trackWallet) {
+        if (session && session.trackWallet) {
           console.log('session:', session);
           const trackedWallet = await this.addOrUpdateTrackedWallets(
             match?.[0],
@@ -346,6 +352,14 @@ export class SyntraBotService {
           const token = match?.[0] || matchX?.[1];
           const data = await this.vybeService.getTokenReport(token);
           if (!data.tokenDetail || !data.topHolders) {
+            await this.syntraBot.deleteMessage(
+              msg.chat.id,
+              loadingGif.message_id,
+            );
+            await this.syntraBot.sendMessage(
+              msg.chat.id,
+              'No token data found',
+            );
             return;
           }
           const tokenDetail = await tokenDisplayMarkup(
@@ -412,7 +426,18 @@ export class SyntraBotService {
         // Handle text inputs if not a command
         return this.handleUserTextInputs(msg, session!);
       }
-      if (msg.text.trim() === '/trackedWallets') {
+      if (regexAmount.test(msg.text.trim()) && session.sellAlertAmount) {
+        // Handle text inputs if not a command
+        return this.handleUserTextInputs(msg, session!);
+      }
+      if (regexAmount.test(msg.text.trim()) && session.buyAlertAmount) {
+        // Handle text inputs if not a command
+        return this.handleUserTextInputs(msg, session!);
+      }
+      if (
+        msg.text.trim() === '/trackedWallets' &&
+        msg.chat.type === 'private'
+      ) {
         return await this.listTrackedWallets(msg.chat.id);
       }
     } catch (error) {
@@ -441,6 +466,9 @@ export class SyntraBotService {
           const setting = await settingsMarkup(
             updatedUser.buySlippage,
             updatedUser.sellSlippage,
+            updatedUser.buyAlertAmount,
+            updatedUser.sellAlertAmount,
+            updatedUser.tracking,
           );
           const replyMarkup = { inline_keyboard: setting.keyboard };
 
@@ -465,6 +493,9 @@ export class SyntraBotService {
           const setting = await settingsMarkup(
             updatedUser.buySlippage,
             updatedUser.sellSlippage,
+            updatedUser.buyAlertAmount,
+            updatedUser.sellAlertAmount,
+            updatedUser.tracking,
           );
           const replyMarkup = { inline_keyboard: setting.keyboard };
 
@@ -528,6 +559,60 @@ export class SyntraBotService {
             'Transaction error, please Try again',
           );
         }
+      }
+      if (regexAmount.test(msg.text.trim()) && session.sellAlertAmount) {
+        const updatedUser = await this.userModel.findOneAndUpdate(
+          { chatId: msg.chat.id },
+          { sellAlertAmount: msg.text.trim() },
+          { new: true },
+        );
+        if (updatedUser) {
+          const setting = await settingsMarkup(
+            updatedUser.buySlippage,
+            updatedUser.sellSlippage,
+            updatedUser.buyAlertAmount,
+            updatedUser.sellAlertAmount,
+            updatedUser.tracking,
+          );
+          const replyMarkup = { inline_keyboard: setting.keyboard };
+
+          await this.syntraBot.editMessageReplyMarkup(replyMarkup, {
+            chat_id: msg.chat.id,
+            message_id: session.messageId,
+          });
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            `✅  Wallet Tracking sell alert amount  to $${msg.text.trim()}`,
+          );
+        }
+        return;
+      }
+      if (regexAmount.test(msg.text.trim()) && session.buyAlertAmount) {
+        const updatedUser = await this.userModel.findOneAndUpdate(
+          { chatId: msg.chat.id },
+          { buyAlertAmount: msg.text.trim() },
+          { new: true },
+        );
+        if (updatedUser) {
+          const setting = await settingsMarkup(
+            updatedUser.buySlippage,
+            updatedUser.sellSlippage,
+            updatedUser.buyAlertAmount,
+            updatedUser.sellAlertAmount,
+            updatedUser.tracking,
+          );
+          const replyMarkup = { inline_keyboard: setting.keyboard };
+
+          await this.syntraBot.editMessageReplyMarkup(replyMarkup, {
+            chat_id: msg.chat.id,
+            message_id: session.messageId,
+          });
+          return await this.syntraBot.sendMessage(
+            msg.chat.id,
+            `✅ Wallet Tracking buy alert amount set to $${msg.text.trim()}`,
+          );
+        }
+        return;
       }
 
       if (session) {
@@ -897,6 +982,9 @@ export class SyntraBotService {
           const setting = await settingsMarkup(
             user.buySlippage,
             user.sellSlippage,
+            user.buyAlertAmount,
+            user.sellAlertAmount,
+            user.tracking,
           );
           const replyMarkup = { inline_keyboard: setting.keyboard };
 
@@ -957,6 +1045,77 @@ export class SyntraBotService {
           return await this.syntraBot.sendMessage(
             query.message.chat.id,
             `Processing command failed, please try again`,
+          );
+
+        case '/sellAlertAmount':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            sellAlertAmount: true,
+            messageId: messageId,
+          });
+          if (session) {
+            await this.promptSellAlertAmount(chatId);
+            return;
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
+        case '/buyAlertAmount':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          session = await this.sessionModel.create({
+            chatId: chatId,
+            buyAlertAmount: true,
+            messageId: messageId,
+          });
+          if (session) {
+            await this.promptBuyAlertAmount(chatId);
+            return;
+          }
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `Processing command failed, please try again`,
+          );
+
+        case '/OnOffWalletTracking':
+          await this.sessionModel.deleteMany({ chatId: chatId });
+          let updatedUser;
+          if (user.tracking) {
+            updatedUser = await this.userModel.findOneAndUpdate(
+              { chatId: chatId },
+              { tracking: false },
+              { new: true },
+            );
+          } else {
+            updatedUser = await this.userModel.findOneAndUpdate(
+              { chatId: chatId },
+              { tracking: true },
+              { new: true },
+            );
+          }
+          const settingConfig = await settingsMarkup(
+            updatedUser.buySlippage,
+            updatedUser.sellSlippage,
+            updatedUser.buyAlertAmount,
+            updatedUser.sellAlertAmount,
+            updatedUser.tracking,
+          );
+          const settingReplyMarkup = {
+            inline_keyboard: settingConfig.keyboard,
+          };
+
+          await this.syntraBot.editMessageReplyMarkup(settingReplyMarkup, {
+            chat_id: query.message.chat.id,
+            message_id: messageId,
+          });
+
+          return await this.syntraBot.sendMessage(
+            query.message.chat.id,
+            `✅ Wallet tracking has been ${
+              updatedUser.tracking ? 'enabled' : 'disabled'
+            } successfully`,
           );
 
         case '/B':
@@ -1363,6 +1522,38 @@ export class SyntraBotService {
     }
   };
 
+  promptSellAlertAmount = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendMessage(
+        chatId,
+        `Reply with your new Wallet tracking token sell value. Example: 100`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  promptBuyAlertAmount = async (chatId: TelegramBot.ChatId) => {
+    try {
+      await this.syntraBot.sendMessage(
+        chatId,
+        `Reply with your new Wallet tracking token buy value. Example: 100`,
+        {
+          reply_markup: {
+            force_reply: true,
+          },
+        },
+      );
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   promptSellPercentageAmount = async (
     chatId: TelegramBot.ChatId,
     tokenAddress: string,
@@ -1424,7 +1615,7 @@ export class SyntraBotService {
 
       await this.syntraBot.sendMessage(
         chatId,
-        `paste the wallet address you wish to track`,
+        `paste the wallet address you wish to track or reply with /track wallet adress (/track 7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU)`,
         {
           reply_markup: {
             force_reply: true,
@@ -1480,7 +1671,7 @@ export class SyntraBotService {
         upsert: true,
       },
     );
-
+    await this.vybeWebsocketService.updateFilters();
     return updatedWallets;
   }
 
@@ -1551,13 +1742,34 @@ export class SyntraBotService {
         chatId,
         ` ${result.walletAddress} has been removed from your tracking list `,
       );
+      await this.vybeWebsocketService.updateFilters();
       return;
     }
     await this.syntraBot.sendMessage(
       chatId,
       ` ${result.walletAddress} has been removed from your tracking list `,
     );
+    await this.vybeWebsocketService.updateFilters();
     return;
+  }
+  async notifyUsers(notificationMessage: TrackingAlert, chatId: number) {
+    try {
+      const notifyUserMarkup =
+        await walletAlertNotificationMarkup(notificationMessage);
+
+      const replyMarkup = { inline_keyboard: notifyUserMarkup.keyboard };
+
+      return await this.syntraBot.sendMessage(
+        chatId,
+        notifyUserMarkup.message,
+        {
+          parse_mode: 'HTML',
+          reply_markup: replyMarkup,
+        },
+      );
+    } catch (error) {
+      console.error('Error notifying users:', error);
+    }
   }
 
   private normalizeHtml(input: string): string {

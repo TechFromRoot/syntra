@@ -25,6 +25,15 @@ export class User {
 
   @Prop({ default: 10 })
   sellSlippage: string;
+
+  @Prop({ default: 10000 })
+  buyAlertAmount: string;
+
+  @Prop({ default: 10000 })
+  sellAlertAmount: string;
+
+  @Prop({ default: false })
+  tracking: boolean;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

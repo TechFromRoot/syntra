@@ -1,8 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { TrackedWallet } from 'src/database/schemas/trackedWallet.schema';
+import { User, UserDocument } from 'src/database/schemas/user.schema';
+import { SyntraBotService } from 'src/syntra-bot/syntra-bot.service';
 import { WebSocket } from 'ws';
+import { TrackingAlert } from './interfaces';
 // import { WebSocketServer } from 'ws';
 
 @Injectable()
@@ -16,6 +19,10 @@ export class VybeWebSocketService {
   constructor(
     @InjectModel(TrackedWallet.name)
     private readonly trackedWalletModel: Model<TrackedWallet>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<User>,
+    @Inject(forwardRef(() => SyntraBotService))
+    private readonly syntraBotService: SyntraBotService,
   ) {
     // this.connect();
   }
@@ -30,53 +37,29 @@ export class VybeWebSocketService {
   }
 
   private async configureFilters(): Promise<void> {
-    // const walletAddresses = await this.getTrackedWallets();
+    console.log('Configuring filters...');
+    this.logger.log('Configuring filters...');
+    const walletAddresses = await this.getTrackedWallets();
 
-    // if (!walletAddresses.length) {
-    //   this.logger.warn('No wallets to track.');
-    //   return;
-    // }
-    const walletAddresses = [
-      '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
-      '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
-      'JD6rVaerbyz6wjQ433nrw6bFTgFrp46MiYmi8EtUAfsG',
-      'Cy4YveF3TX6WZBVWbCDPHE4vLa1a9ZLngZqykrVEsBku',
-    ];
+    if (!walletAddresses.length) {
+      this.logger.warn('No wallets to track.');
+      return;
+    }
+    // const walletAddresses = [
+    //   '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
+    //   '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
+    //   'JD6rVaerbyz6wjQ433nrw6bFTgFrp46MiYmi8EtUAfsG',
+    //   'Cy4YveF3TX6WZBVWbCDPHE4vLa1a9ZLngZqykrVEsBku',
+    // ];
     const configureMessage = JSON.stringify({
       type: 'configure',
       filters: {
-        trades: walletAddresses.map((walletAddress) => ({
+        // trades: walletAddresses.map((walletAddress) => ({
+        //   feePayer: walletAddress,
+        // })),
+        transfers: walletAddresses.map((walletAddress) => ({
           feePayer: walletAddress,
         })),
-        // trades: [
-        //   {
-        //     authorityAddress: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
-        //   },
-        //   { feePayer: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW' },
-        // ],
-        // transfers: [
-        //   {
-        //     // tokenMintAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-        //     feePayer: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
-
-        //     // authorityAddress: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
-        //     // feePayer: '8MqRTAQnjhDYH7TWS1b1DjFog4CLZfySWE5cZeotG2VW',
-        //   },
-        // ],
-        // trades: [
-        //   { feePayer: 'JD6rVaerbyz6wjQ433nrw6bFTgFrp46MiYmi8EtUAfsG' },
-        //   {
-        //     feePayer: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
-        //   },
-        // ],
-        // trades: [
-        //   {
-        //     // tokenMintAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-        //     // programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
-        //     authorityAddress: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
-        //     feePayer: '7of9rX4qvtMQFYKi3x64PPzC3EqY1759bJENHzSp4BMU',
-        //   },
-        // ],
       },
     });
     this.ws?.send(configureMessage);
@@ -103,7 +86,7 @@ export class VybeWebSocketService {
       try {
         const parsedMessage = JSON.parse(message.toString());
         this.logger.log('Received message:', parsedMessage);
-        await this.processMessage(parsedMessage);
+        await this.processTransferMessage(parsedMessage);
       } catch (error) {
         this.logger.error(`Failed to parse message: ${error.message}`);
       }
@@ -124,9 +107,16 @@ export class VybeWebSocketService {
     });
   }
 
-  private async processMessage(parsedMessage: any): Promise<void> {
-    const { senderAddress, receiverAddress, amount, decimal, signature } =
-      parsedMessage;
+  private async processTransferMessage(parsedMessage: any): Promise<void> {
+    const {
+      senderAddress,
+      receiverAddress,
+      amount,
+      decimal,
+      signature,
+      mintAddress,
+      blockTime,
+    } = parsedMessage;
     const amountInTokens = amount / 10 ** decimal;
 
     // Check if the sender or receiver is a tracked wallet
@@ -134,33 +124,87 @@ export class VybeWebSocketService {
     const isSenderTracked = trackedWallets.includes(senderAddress);
     const isReceiverTracked = trackedWallets.includes(receiverAddress);
 
-    if (isSenderTracked) {
+    if (
+      isSenderTracked &&
+      mintAddress !== '11111111111111111111111111111111' &&
+      mintAddress !== 'So11111111111111111111111111111111111111112'
+    ) {
+      const trackingDetails: TrackingAlert = {
+        walletAddress: senderAddress,
+        type: 'sold',
+        amount: amountInTokens,
+        signature,
+        mintAddress,
+        timestamp: blockTime,
+      };
       // Sell: Tracked wallet is the sender
-      const notificationMessage = `${senderAddress} sold ${amountInTokens} tokens (signature: ${signature})`;
-      await this.notifyUsers(senderAddress, notificationMessage);
+      // const notificationMessage = `${senderAddress} sold ${amountInTokens} ${mintAddress} tokens (signature: ${signature})`;
+      await this.notifyUsers(senderAddress, trackingDetails);
     }
 
-    if (isReceiverTracked) {
+    if (
+      isReceiverTracked &&
+      mintAddress !== '11111111111111111111111111111111' &&
+      mintAddress !== 'So11111111111111111111111111111111111111112'
+    ) {
+      const trackingDetails: TrackingAlert = {
+        walletAddress: receiverAddress,
+        type: 'bought',
+        amount: amountInTokens,
+        signature,
+        mintAddress,
+        timestamp: blockTime,
+      };
       // Buy: Tracked wallet is the receiver
-      const notificationMessage = `${receiverAddress} bought ${amountInTokens} tokens (signature: ${signature})`;
-      await this.notifyUsers(receiverAddress, notificationMessage);
+      // const notificationMessage = `${receiverAddress} bought ${amountInTokens} ${mintAddress} tokens (signature: ${signature})`;
+      await this.notifyUsers(receiverAddress, trackingDetails);
     }
   }
 
   private async notifyUsers(
     walletAddress: string,
-    message: string,
+    message: TrackingAlert,
   ): Promise<void> {
     // Find users tracking this wallet
-    const trackedWallets = await this.trackedWalletModel.find({
-      where: { walletAddress },
-    });
-    const userIds = trackedWallets.map((tw) => tw.chatId);
+    const Users = await this.getUsersTrackingWallet(walletAddress);
+    if (!Users || Users.length === 0) {
+      this.logger.warn(`No users tracking wallet: ${walletAddress}`);
+      return;
+    }
+    const userIds = Users.map((user) => user.chatId);
+    console.log('Notifying users...,userIds:', userIds);
+    // const userIds = trackedWallets.flatMap((tw) => tw.chatId); // Ensures it's a flat array
 
-    // Placeholder for notification logic
-    this.logger.log(`Notifying users ${userIds.join(', ')}: ${message}`);
-    // Implement your notification logic here, e.g., Firebase Cloud Messaging, email, etc.
-    // Example: await this.notificationService.sendPushNotification(userIds, message);
+    await Promise.allSettled(
+      Users.map(async (user) => {
+        try {
+          if (
+            message.type === 'bought' &&
+            Number(user.buyAlertAmount) < message.amount &&
+            user.tracking === true
+          ) {
+            await this.syntraBotService.notifyUsers(message, user.chatId);
+            console.log(`✅ Message sent to chatId ${user.chatId}`);
+          } else if (
+            message.type === 'sold' &&
+            Number(user.sellAlertAmount) < message.amount &&
+            user.tracking === true
+          ) {
+            await this.syntraBotService.notifyUsers(message, user.chatId);
+            console.log(`✅ Message sent to chatId ${user.chatId}`);
+          } else {
+            console.log(
+              `❌ Alert amount not met for chatId ${user.chatId}. Amount: ${message.amount}, Alert Amount: ${user.buyAlertAmount} or ${user.sellAlertAmount}`,
+            );
+          }
+        } catch (error) {
+          console.error(
+            `❌ Failed to send message to chatId ${user.chatId}`,
+            error,
+          );
+        }
+      }),
+    );
   }
 
   private attemptReconnect(): void {
@@ -183,5 +227,21 @@ export class VybeWebSocketService {
     if (this.ws?.readyState === WebSocket.OPEN) {
       await this.configureFilters();
     }
+  }
+
+  async getUsersTrackingWallet(walletAddress: string): Promise<UserDocument[]> {
+    const trackedWallet = await this.trackedWalletModel
+      .findOne({ walletAddress })
+      .exec();
+
+    if (!trackedWallet || !trackedWallet.chatId?.length) {
+      return []; // No one is tracking this wallet
+    }
+
+    const users = await this.userModel
+      .find({ chatId: { $in: trackedWallet.chatId } })
+      .exec();
+
+    return users;
   }
 }

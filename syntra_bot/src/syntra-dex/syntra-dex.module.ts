@@ -7,6 +7,7 @@ import { Transaction } from '@solana/web3.js';
 import { TransactionSchema } from 'src/database/schemas/transaction.schema';
 import { WalletModule } from 'src/wallet/wallet.module';
 import { SyntraBotModule } from 'src/syntra-bot/syntra-bot.module';
+import { VybeIntegrationModule } from 'src/vybe-integration/vybe-integration.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SyntraBotModule } from 'src/syntra-bot/syntra-bot.module';
       { name: Transaction.name, schema: TransactionSchema },
     ]),
     WalletModule,
+    VybeIntegrationModule,
     forwardRef(() => SyntraBotModule),
   ],
   exports: [SyntraDexService],

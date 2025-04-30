@@ -51,6 +51,12 @@ export class Session {
   sellSlippage: boolean;
 
   @Prop({ default: false })
+  sellAlertAmount: boolean;
+
+  @Prop({ default: false })
+  buyAlertAmount: boolean;
+
+  @Prop({ default: false })
   trackWallet: boolean;
 
   @Prop()

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { VybeIntegrationService } from './vybe-integration.service';
 import { VybeWebSocketService } from './vybe-websocket';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -7,6 +7,8 @@ import {
   TrackedWalletSchema,
 } from 'src/database/schemas/trackedWallet.schema';
 import { HttpModule } from '@nestjs/axios';
+import { SyntraBotModule } from 'src/syntra-bot/syntra-bot.module';
+import { User, UserSchema } from 'src/database/schemas/user.schema';
 
 @Module({
   imports: [
@@ -14,8 +16,10 @@ import { HttpModule } from '@nestjs/axios';
     MongooseModule.forFeature([
       { name: TrackedWallet.name, schema: TrackedWalletSchema },
     ]),
+    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+    forwardRef(() => SyntraBotModule),
   ],
   providers: [VybeIntegrationService, VybeWebSocketService],
-  exports: [VybeIntegrationService],
+  exports: [VybeIntegrationService, VybeWebSocketService],
 })
 export class VybeIntegrationModule {}

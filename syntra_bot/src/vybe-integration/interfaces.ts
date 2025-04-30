@@ -34,3 +34,12 @@ export interface TokenReport {
   tokenDetail: TokenData | null;
   topHolders: HolderData[] | null;
 }
+
+export interface TrackingAlert {
+  walletAddress: string;
+  type: 'bought' | 'sold';
+  amount: number;
+  signature: string;
+  mintAddress: string;
+  timestamp: number;
+}

@@ -10,6 +10,7 @@ import { tokenDisplayMarkup } from './tokenDisplay';
 import { transactionHistoryMarkup } from './transactionHistory';
 import { walletFeaturesMarkup } from './walletFeatures';
 import { welcomeMessageMarkup } from './welcome';
+import { walletAlertNotificationMarkup } from './walletAlertNotification';
 
 export {
   welcomeMessageMarkup,
@@ -24,4 +25,5 @@ export {
   sellTokenMarkup,
   buyTokenMarkup,
   transactionHistoryMarkup,
+  walletAlertNotificationMarkup,
 };
