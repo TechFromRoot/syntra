@@ -55,22 +55,25 @@ export class SyntraBotService {
         if (userExist) {
           await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
           const welcome = await welcomeMessageMarkup(username);
+          const replyMarkup = { inline_keyboard: welcome.keyboard };
 
           return await this.syntraBot.sendMessage(
             msg.chat.id,
             welcome.message,
-            { parse_mode: 'HTML' },
+            { parse_mode: 'HTML', reply_markup: replyMarkup },
           );
         }
         const saved = await this.saveUserToDB(msg.chat.id);
 
         const welcome = await welcomeMessageMarkup(username);
+        const replyMarkup = { inline_keyboard: welcome.keyboard };
 
         if (welcome && saved) {
           await this.syntraBot.sendChatAction(msg.chat.id, 'typing');
 
           await this.syntraBot.sendMessage(msg.chat.id, welcome.message, {
             parse_mode: 'HTML',
+            reply_markup: replyMarkup,
           });
         } else {
           await this.syntraBot.sendMessage(
